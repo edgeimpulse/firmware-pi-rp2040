@@ -38,6 +38,11 @@ static float imu_data[INERTIAL_AXIS_SAMPLED];
 bool ei_inertial_sensor_init(void)
 {
     uint8_t acc_type = IMU.begin();
+    if (!acc_type) { 
+        acc_type = IMU1.begin(); 
+        IMU = IMU1;
+    }
+
     if (!acc_type) {
         return false;
     }

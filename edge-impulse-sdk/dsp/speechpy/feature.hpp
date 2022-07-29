@@ -444,18 +444,18 @@ public:
         float frame_length, float frame_stride, uint16_t num_filters,
         uint16_t version)
     {
-        uint16_t rows = processing::calculate_no_of_stack_frames(
+        int32_t rows = processing::calculate_no_of_stack_frames(
             signal_length,
             sampling_frequency,
             frame_length,
             frame_stride,
             false,
             version);
-        uint16_t cols = num_filters;
+        int32_t cols = num_filters;
 
         matrix_size_t size_matrix;
-        size_matrix.rows = rows;
-        size_matrix.cols = cols;
+        size_matrix.rows = (uint32_t)rows;
+        size_matrix.cols = (uint32_t)cols;
         return size_matrix;
     }
 
@@ -569,18 +569,18 @@ public:
         float frame_length, float frame_stride, uint16_t num_cepstral,
         uint16_t version)
     {
-        uint16_t rows = processing::calculate_no_of_stack_frames(
+        int32_t rows = processing::calculate_no_of_stack_frames(
             signal_length,
             sampling_frequency,
             frame_length,
             frame_stride,
             false,
             version);
-        uint16_t cols = num_cepstral;
+        int32_t cols = num_cepstral;
 
         matrix_size_t size_matrix;
-        size_matrix.rows = rows;
-        size_matrix.cols = cols;
+        size_matrix.rows = (uint32_t)rows;
+        size_matrix.cols = (uint32_t)cols;
         return size_matrix;
     }
 };

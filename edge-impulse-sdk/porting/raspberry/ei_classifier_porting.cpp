@@ -27,6 +27,11 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
+ #include <string.h>
+ 
+// Include FreeRTOS for delay
+#include <FreeRTOS.h>
+#include <task.h>
 
 #define EI_WEAK_FN __attribute__((weak))
 
@@ -35,7 +40,7 @@ EI_WEAK_FN EI_IMPULSE_ERROR ei_run_impulse_check_canceled() {
 }
 
 EI_WEAK_FN EI_IMPULSE_ERROR ei_sleep(int32_t time_ms) {
-    sleep_ms(time_ms);
+    vTaskDelay(time_ms / portTICK_PERIOD_MS);
     return EI_IMPULSE_OK;
 }
 
@@ -74,15 +79,26 @@ __attribute__((weak)) void ei_printf_float(float f) {
 }
 
 __attribute__((weak)) void *ei_malloc(size_t size) {
-    return malloc(size);
+    return pvPortMalloc(size);
+}
+
+void *pvPortCalloc(size_t sNb, size_t sSize)
+{
+    void *vPtr = NULL;
+    if (sSize > 0) {
+        vPtr = pvPortMalloc(sSize * sNb); // Call FreeRTOS or other standard API
+        if(vPtr)
+           memset(vPtr, 0, (sSize * sNb)); // Must required
+    }
+    return vPtr;
 }
 
 __attribute__((weak)) void *ei_calloc(size_t nitems, size_t size) {
-    return calloc(nitems, size);
+    return pvPortCalloc(nitems, size);
 }
 
 __attribute__((weak)) void ei_free(void *ptr) {
-    free(ptr);
+    vPortFree(ptr);
 }
 
 #if defined(__cplusplus) && EI_C_LINKAGE == 1

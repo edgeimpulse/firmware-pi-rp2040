@@ -39,7 +39,7 @@ class DHT11 {
 public:
     DHT11(uint8_t pin);
     bool begin(void);
-    bool read();
+    uint8_t read();
     float readTemperature(bool S = false);
     float readHumidity(void);
     float convertCtoF(void);

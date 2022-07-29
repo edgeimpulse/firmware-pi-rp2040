@@ -56,4 +56,6 @@ Raspberry  Pi  Pico  to  your  computer  using  a  micro-USB  cable,  making  su
 
 ## Troubleshooting
 
-For Arduino RP2040 Connect, if you need to keep using Arduino IDE after you finished using Edge Impulse firmware, just connect the board to your computer and flash any code to the board. 
+- For Arduino RP2040 Connect, if you need to keep using Arduino IDE after you finished using Edge Impulse firmware, just connect the board to your computer and flash any code to the board. 
+
+- If you are using Windows and experience isssue described in https://github.com/edgeimpulse/firmware-pi-rp2040/issues/1, you need to upgrade the tinyusb submodule of pico-sdk at least to commit https://github.com/hathach/tinyusb/commit/6ec5174d8b24d1f01a443c74a0a3dbee00523efc. After upgrade, remember to re-run cmake command.

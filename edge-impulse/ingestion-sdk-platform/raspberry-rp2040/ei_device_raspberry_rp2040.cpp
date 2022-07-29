@@ -21,119 +21,107 @@
  */
 
 /* Include ----------------------------------------------------------------- */
+#include "ei_config_types.h"
 #include "ei_device_raspberry_rp2040.h"
-#include "ei_rp2040_fs_commands.h"
+#include "ei_microphone.h"
+#include "ei_flash_memory.h"
 
 #include <pico/stdlib.h>
 #include <pico/unique_id.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <malloc.h>
 
-#include "ei_config_types.h"
+#include <FreeRTOS.h>
+#include <timers.h>
 
 /* Constants --------------------------------------------------------------- */
 
-/** Max size for device id array */
-#define DEVICE_ID_MAX_SIZE 32
+#define EI_LED_OFF    gpio_put(LED_PIN, 0);
+#define EI_LED_ON     gpio_put(LED_PIN, 1);
 
-extern ei_config_t *ei_config_get_config();
-
-/** Sensors */
-typedef enum
-{
-    LIGHT = 0
-
-} used_sensors_t;
-
-/** Data Output Baudrate */
-const ei_device_data_output_baudrate_t ei_dev_max_data_output_baudrate = {
-    "921600",
-    MAX_BAUD,
-};
-
-const ei_device_data_output_baudrate_t ei_dev_default_data_output_baudrate = {
-    "115200",
-    DEFAULT_BAUD,
-};
-
-#define EDGE_STRINGIZE_(x) #x
-#define EDGE_STRINGIZE(x)  EDGE_STRINGIZE_(x)
-
-/** Global flag */
-bool stop_sampling;
-
-/** Device type */
-static const char *ei_device_type = "RASPBERRY_PI_RP2040"; //EDGE_STRINGIZE(TARGET_NAME);
-
-/** Device id array */
-static char ei_device_id[DEVICE_ID_MAX_SIZE];
-
-/** Device object, for this class only 1 object should exist */
-EiDeviceRP2040 EiDevice;
+/** Global objects */
+TimerHandle_t fusion_timer;
+void (*sample_cb_ptr)(void);
 
 /* Private function declarations ------------------------------------------- */
-static int get_id_c(uint8_t out_buffer[32], size_t *out_size);
-static int get_type_c(uint8_t out_buffer[32], size_t *out_size);
-static bool get_wifi_connection_status_c(void);
-static bool get_wifi_present_status_c(void);
+void vTimerCallback(TimerHandle_t xTimer);
 
 /* Public functions -------------------------------------------------------- */
 
-EiDeviceRP2040::EiDeviceRP2040(void)
+EiDeviceRP2040::EiDeviceRP2040(EiDeviceMemory* mem)
 {
-    /* Clear frequency arrays */
-    for (int i = 0; i < EI_DEVICE_N_SENSORS; i++) {
-        for (int y = 0; y < EI_MAX_FREQUENCIES; y++) {
-            sensors[i].frequencies[y] = 0.f;
-        }
-    }
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+
+    EiDeviceInfo::memory = mem;
+
+    init_device_id();
+
+    //load_config();
+
+    device_type = "RASPBERRY_PI_RP2040";
+
+    camera_present = false;
+
+    // TODO
+    //net = static_cast<EiDeviceRP2040*>(EiDeviceRP2040::get_network_device());
+    // the absence of error on device init is success
+    //network_present = !(net->init());
+
+    // microphone is not handled by fusion system
+    standalone_sensor_list[0].name = "Built-in microphone";
+    standalone_sensor_list[0].start_sampling_cb = &ei_microphone_sample_start;
+    standalone_sensor_list[0].max_sample_length_s = mem->get_available_sample_bytes() / (16000 * 2);
+    standalone_sensor_list[0].frequencies[0] = 16000.0f;
+    standalone_sensor_list[0].frequencies[1] = 8000.0f;
 }
 
-/**
- * @brief      For the device ID, the FLASH chip ID is used.
- *             The chip ID string is copied to the out_buffer.
- *
- * @param      out_buffer  Destination array for id string
- * @param      out_size    Length of id string
- *
- * @return     0
- */
-int EiDeviceRP2040::get_id(uint8_t out_buffer[32], size_t *out_size)
+
+EiDeviceRP2040::~EiDeviceRP2040()
 {
-    return get_id_c(out_buffer, out_size);
+
 }
 
-/**
- * @brief      Gets the identifier pointer.
- *
- * @return     The identifier pointer.
- */
-const char *EiDeviceRP2040::get_id_pointer(void)
+void EiDeviceRP2040::init_device_id(void)
 {
-    return (const char *)ei_device_id;
+    // Setup device ID
+    char temp[18];
+
+    uint id_len = 2 * PICO_UNIQUE_BOARD_ID_SIZE_BYTES + 1;
+    char id_out[id_len];
+
+    pico_get_unique_board_id_string(id_out, id_len);
+
+    /* Setup device ID */
+    sprintf(
+        temp,
+        "%02X:%02X:%02X:%02X:%02X:%02X",
+        id_out[0],
+        id_out[1],
+        id_out[3],
+        id_out[4],
+        id_out[5],
+        id_out[6]);
+
+    device_id = std::string(temp);
 }
 
-/**
- * @brief      Copy device type in out_buffer & update out_size
- *
- * @param      out_buffer  Destination array for device type string
- * @param      out_size    Length of string
- *
- * @return     -1 if device type string exceeds out_buffer
- */
-int EiDeviceRP2040::get_type(uint8_t out_buffer[32], size_t *out_size)
+EiDeviceInfo* EiDeviceInfo::get_device(void)
 {
-    return get_type_c(out_buffer, out_size);
+    //static EiDeviceRAM<256, 132> memory(sizeof(EiConfig));
+    static EiFlashMemory memory(sizeof(EiConfig));
+    static EiDeviceRP2040 dev(&memory);
+
+    return &dev;
 }
 
-/**
- * @brief      Gets the type pointer.
- *
- * @return     The type pointer.
- */
-const char *EiDeviceRP2040::get_type_pointer(void)
+void EiDeviceRP2040::clear_config(void)
 {
-    return (const char *)ei_device_type;
+    EiDeviceInfo::clear_config();
+
+    init_device_id();
+    save_config();
 }
 
 /**
@@ -143,7 +131,45 @@ const char *EiDeviceRP2040::get_type_pointer(void)
  */
 void EiDeviceRP2040::delay_ms(uint32_t milliseconds)
 {
-    sleep_ms(milliseconds);
+    ei_sleep(milliseconds);
+}
+
+void EiDeviceRP2040::set_state(EiState state)
+{
+    switch(state) {
+    case eiStateErasingFlash:
+        EI_LED_ON;
+        break;
+    case eiStateSampling:
+        EI_LED_ON;
+        ei_sleep(50);
+        EI_LED_OFF;
+        ei_sleep(50);          
+        break;
+    case eiStateUploading:
+        EI_LED_ON;    
+        break;
+    case eiStateFinished:
+        for (int i = 0; i < 2; i++) {    
+            EI_LED_ON;
+            ei_sleep(100);
+            EI_LED_OFF;
+            ei_sleep(100);            
+        }                                
+        break;                
+    default:
+        EI_LED_OFF;
+    }
+}
+
+/**
+ * @brief      No Wifi available for device.
+ *
+ * @return     Always return false
+ */
+bool EiDeviceRP2040::scan_networks(void)
+{
+    return false;
 }
 
 /**
@@ -163,7 +189,7 @@ bool EiDeviceRP2040::get_wifi_connection_status(void)
  */
 bool EiDeviceRP2040::get_wifi_present_status(void)
 {
-    return false;
+    return network_present;
 }
 
 /**
@@ -178,31 +204,24 @@ bool EiDeviceRP2040::get_sensor_list(
     const ei_device_sensor_t **sensor_list,
     size_t *sensor_list_size)
 {
-    /* all sensors are handled by sensors fusion subsystem */
-    *sensor_list = NULL;
-    *sensor_list_size = 0;
-
+    *sensor_list = this->standalone_sensor_list;
+    *sensor_list_size = this->standalone_sensor_num;
     return false;
 }
 
-/**
- * @brief Get byte size of memory block
- *
- * @return uint32_t size in bytes
- */
-uint32_t EiDeviceRP2040::filesys_get_block_size(void)
+uint32_t EiDeviceRP2040::get_data_output_baudrate(void)
 {
-    return ei_rp2040_fs_get_block_size();
+    return MAX_BAUD;
 }
 
-/**
- * @brief Get number of available blocks
- *
- * @return uint32_t
- */
-uint32_t EiDeviceRP2040::filesys_get_n_available_sample_blocks(void)
+void EiDeviceRP2040::set_default_data_output_baudrate(void)
 {
-    return ei_rp2040_fs_get_n_available_sample_blocks();
+    //not used
+}
+
+void EiDeviceRP2040::set_max_data_output_baudrate(void)
+{
+    //not used
 }
 
 /**
@@ -213,13 +232,15 @@ uint32_t EiDeviceRP2040::filesys_get_n_available_sample_blocks(void)
  */
 bool EiDeviceRP2040::start_sample_thread(void (*sample_read_cb)(void), float sample_interval_ms)
 {
-    stop_sampling = false;
-
-    while (!stop_sampling) {
-
-        sample_read_cb();
-        ei_sleep(sample_interval_ms);
-    }
+    sample_cb_ptr = sample_read_cb;   
+    fusion_timer = xTimerCreate(
+                        "Fusion sampler",
+                        (uint32_t)sample_interval_ms / portTICK_PERIOD_MS,
+                        pdTRUE,
+                        (void *)0,
+                        vTimerCallback
+                    );
+    xTimerStart(fusion_timer, 0);
 
     return true;
 }
@@ -230,64 +251,81 @@ bool EiDeviceRP2040::start_sample_thread(void (*sample_read_cb)(void), float sam
  */
 bool EiDeviceRP2040::stop_sample_thread(void)
 {
-    stop_sampling = true;
+    xTimerStop(fusion_timer, 0);
+    //if (xTimerStop(fusion_timer, 0) != pdPASS)
+    //{
+    //    ei_printf("Timer has not been stopped \n");
+    //}
     return true;
 }
 
-int EiDeviceRP2040::get_data_output_baudrate(ei_device_data_output_baudrate_t *baudrate)
+/**
+ * @brief      Checks for presense of b character to stop the inference
+ *
+ * @return     Returns true if b character is found, false otherwise
+ */
+
+bool ei_user_invoke_stop(void)
 {
-    memcpy(baudrate, &ei_dev_default_data_output_baudrate, sizeof(ei_device_data_output_baudrate_t));
-    return 0;
+    bool stop_found = false;
+	char ch = getchar_timeout_us(1000 * 10);
+
+    if (ch == 'b') {
+        stop_found = true;
+    }
+
+    return stop_found;
 }
 
 /**
- * @brief      Get a C callback for the get_id method
+ * @brief      Get next available byte
  *
- * @return     Pointer to c get function
+ * @return     byte
  */
-c_callback EiDeviceRP2040::get_id_function(void)
+char ei_get_serial_byte(void)
 {
-    return &get_id_c;
+	char ch = getchar();
+    // for some reason ESP32 only gets 10 (\n)and AT server has 13 (\r) as terminator character...
+    if (ch == '\n') {
+        ch = '\r';
+    }
+    
+    return ch;
 }
 
 /**
- * @brief      Get a C callback for the get_type method
+ * @brief      Write character to serial
  *
- * @return     Pointer to c get function
+ * @param      cChar     Char addr to write
  */
-c_callback EiDeviceRP2040::get_type_function(void)
+void ei_putc(char cChar)
 {
-    return &get_type_c;
+    putchar(cChar);
 }
 
-/**
- * @brief      Get a C callback for the get_wifi_connection_status method
- *
- * @return     Pointer to c get function
- */
-c_callback_status EiDeviceRP2040::get_wifi_connection_status_function(void)
+
+char ei_getchar()
 {
-    return &get_wifi_connection_status_c;
+	char ch = getchar();
+    // for some reason ESP32 only gets 10 (\n)and AT server has 13 (\r) as terminator character...
+
+    if (ch == 255) {
+        ch = 0;
+    }
+
+    if (ch == '\n') {
+        ch = '\r';
+    }
+    
+    return ch;
+
 }
 
-/**
- * @brief      Get a C callback for the wifi present method
- *
- * @return     The wifi present status function.
- */
-c_callback_status EiDeviceRP2040::get_wifi_present_status_function(void)
-{
-    return &get_wifi_present_status_c;
-}
+/* Private functions ------------------------------------------------------- */
 
-/**
- * @brief      Get a C callback to the read sample buffer function
- *
- * @return     The read sample buffer function.
- */
-c_callback_read_sample_buffer EiDeviceRP2040::get_read_sample_buffer_function(void)
+void vTimerCallback(TimerHandle_t xTimer)
 {
-    return &read_sample_buffer;
+    sample_cb_ptr();
 }
 
 /**
@@ -319,173 +357,19 @@ void ei_printf(const char *format, ...)
     }
 }
 
-/**
- * @brief      Write serial data with length to Serial output
- *
- * @param      data    The data
- * @param[in]  length  The length
- */
-void ei_write_string(char *data, int length)
+void printMemoryInfo(void)
 {
-    printf(data);
-}
-
-/**
- * @brief      NOT IMPLEMENTED
- *
- * @return     NOT IMPLEMENTED
- */
-int ei_get_serial()
-{
-    return 0;
-}
-
-/**
- * @brief      NOT IMPLEMENTED
- *
- * @return     NOT IMPLEMENTED
- */
-int ei_get_serial_available(void)
-{
-    return 0;
-}
-
-/**
- * @brief      Checks for presense of b character to stop the inference
- *
- * @return     Returns true if b character is found, false otherwise
- */
-
-bool ei_user_invoke_stop(void)
-{
-    bool stop_found = false;
-    char data = getchar_timeout_us(1000 * 10);
-
-    if (data == 'b') {
-        stop_found = true;
-    }
-
-    return stop_found;
-}
-
-/**
- * @brief      Get next available byte
- *
- * @return     byte
- */
-char ei_get_serial_byte(void)
-{
-    return getchar();
-}
-
-/**
- * @brief      Write character to serial
- *
- * @param      cChar     Char addr to write
- */
-void ei_putc(char cChar)
-{
-    printf(&cChar);
-}
-
-/* Private functions ------------------------------------------------------- */
-
-static int get_id_c(uint8_t out_buffer[32], size_t *out_size)
-{
-    uint id_len = 2 * PICO_UNIQUE_BOARD_ID_SIZE_BYTES + 1;
-    char id_out[id_len];
-
-    pico_get_unique_board_id_string(id_out, id_len);
-
-    /* Setup device ID */
-    snprintf(
-        &ei_device_id[0],
-        DEVICE_ID_MAX_SIZE,
-        "%02X:%02X:%02X:%02X:%02X:%02X",
-        id_out[0],
-        id_out[1],
-        id_out[3],
-        id_out[4],
-        id_out[5],
-        id_out[6]);
-
-    size_t length = strlen(ei_device_id);
-
-    if (length < 32) {
-        memcpy(out_buffer, ei_device_id, length);
-
-        *out_size = length;
-        return 0;
-    }
-
-    else {
-        *out_size = 0;
-        return -1;
-    }
-}
-
-static int get_type_c(uint8_t out_buffer[32], size_t *out_size)
-{
-    size_t length = strlen(ei_device_type);
-
-    if (length < 32) {
-        memcpy(out_buffer, ei_device_type, length);
-
-        *out_size = length;
-        return 0;
-    }
-
-    else {
-        *out_size = 0;
-        return -1;
-    }
-}
-
-static bool get_wifi_connection_status_c(void)
-{
-    return false;
-}
-
-static bool get_wifi_present_status_c(void)
-{
-    return false;
-}
-
-/**
- * @brief      Read samples from sample memory and send to data_fn function
- *
- * @param[in]  begin    Start address
- * @param[in]  length   Length of samples in bytes
- * @param[in]  data_fn  Callback function for sample data
- *
- * @return     false on flash read function
- */
-static bool read_sample_buffer(size_t begin, size_t length, void (*data_fn)(uint8_t *, size_t))
-{
-
-    size_t pos = begin;
-    size_t bytes_left = length;
-
-    // we're encoding as base64 in AT+READFILE, so this needs to be divisable by 3
-    uint8_t buffer[513];
-
-    while (1) {
-        size_t bytes_to_read = sizeof(buffer);
-        if (bytes_to_read > bytes_left) {
-            bytes_to_read = bytes_left;
-        }
-        if (bytes_to_read == 0) {
-            return true;
-        }
-        int r = ei_rp2040_fs_read_sample_data(buffer, pos, bytes_to_read);
-        if (r != 0) {
-            return false;
-        }
-        data_fn(buffer, bytes_to_read);
-
-        pos += bytes_to_read;
-        bytes_left -= bytes_to_read;
-    }
-
-    return true;
+    struct mallinfo mi;
+    memset(&mi, 0, sizeof(struct mallinfo));
+    mi = mallinfo();
+    printf("Total non-mmapped bytes (arena):       %zu\n", mi.arena);
+    printf("# of free chunks (ordblks):            %zu\n", mi.ordblks);
+    printf("# of free fastbin blocks (smblks):     %zu\n", mi.smblks);
+    printf("# of mapped regions (hblks):           %zu\n", mi.hblks);
+    printf("Bytes in mapped regions (hblkhd):      %zu\n", mi.hblkhd);
+    printf("Max. total allocated space (usmblks):  %zu\n", mi.usmblks);
+    printf("Free bytes held in fastbins (fsmblks): %zu\n", mi.fsmblks);
+    printf("Total allocated space (uordblks):      %zu\n", mi.uordblks);
+    printf("Total free space (fordblks):           %zu\n", mi.fordblks);
+    printf("Topmost releasable block (keepcost):   %zu\n", mi.keepcost);
 }

@@ -2,8 +2,13 @@ cmake_minimum_required(VERSION 3.13.1)
 
 set(MODEL_FOLDER .)
 set(EI_SDK_FOLDER edge-impulse-sdk)
+set(EI_PLATFORM_FOLDER edge-impulse)
+set(FIRMWARE_SDK_FOLDER firmware-sdk)
 
 include(pico_sdk_import.cmake)
+
+# Pull in FreeRTOS
+include(FreeRTOS_Kernel_import.cmake)
 
 project(ei_rp2040_firmware C CXX ASM)
 set(CMAKE_C_STANDARD 11)
@@ -35,7 +40,23 @@ add_executable(ei_rp2040_firmware
     src/main.cpp
 )
 
-include(${MODEL_FOLDER}/utils/cmake/utils.cmake)
+OPTION(DEFINE_PIN_UART
+    "Only use TX/RX pins and not USB UART"
+    OFF)
+IF(DEFINE_PIN_UART)
+    MESSAGE("Adding PIN_UART flag...")
+    ADD_DEFINITIONS(-DPIN_UART)
+    MESSAGE("Build type is " ${CMAKE_BUILD_TYPE})
+    pico_enable_stdio_usb(ei_rp2040_firmware 0)
+    pico_enable_stdio_uart(ei_rp2040_firmware 1)
+ELSE()
+    pico_enable_stdio_usb(ei_rp2040_firmware 1)
+    pico_enable_stdio_uart(ei_rp2040_firmware 1)
+ENDIF(DEFINE_PIN_UART)
+
+include(${EI_SDK_FOLDER}/cmake/utils.cmake)
+
+pico_generate_pio_header(ei_rp2040_firmware ${CMAKE_CURRENT_LIST_DIR}/ThirdParty/PDM/src/pdm.pio)
 
 target_link_libraries(ei_rp2040_firmware
                       pico_stdlib
@@ -44,11 +65,11 @@ target_link_libraries(ei_rp2040_firmware
                       hardware_adc
                       hardware_i2c
                       hardware_irq
-                      hardware_flash)
-
-# enable usb output, disable uart output
-pico_enable_stdio_usb(ei_rp2040_firmware 1)
-pico_enable_stdio_uart(ei_rp2040_firmware 0)
+                      hardware_flash
+                      hardware_pio
+                      hardware_dma
+                      FreeRTOS-Kernel
+                      FreeRTOS-Kernel-Heap4)
 
 target_include_directories(ei_rp2040_firmware PRIVATE
     ${MODEL_FOLDER}
@@ -72,18 +93,20 @@ target_include_directories(ei_rp2040_firmware PRIVATE
     ${EI_SDK_FOLDER}/CMSIS/DSP/Include
     ${EI_SDK_FOLDER}/CMSIS/Core/Include
     ${EI_SDK_FOLDER}/porting
-    edge-impulse/ingestion-sdk-c
-    edge-impulse/ingestion-sdk-platform/raspberry-rp2040
-    edge-impulse/ingestion-sdk-platform/sensors
-    edge-impulse/mbedtls_hmac_sha256_sw
-    edge-impulse/QCBOR/inc
-    edge-impulse/QCBOR/src
-    firmware-sdk
-    firmware-sdk/at-server
+    ${EI_PLATFORM_FOLDER}
+    ${EI_PLATFORM_FOLDER}/ingestion-sdk-c
+    ${EI_PLATFORM_FOLDER}/ingestion-sdk-platform/raspberry-rp2040
+    ${EI_PLATFORM_FOLDER}/ingestion-sdk-platform/sensors
+    ${EI_PLATFORM_FOLDER}/mbedtls_hmac_sha256_sw
+    ${EI_PLATFORM_FOLDER}/inference
+    ${EI_PLATFORM_FOLDER}/QCBOR/inc
+    ${FIRMWARE_SDK_FOLDER}
+    ${FIRMWARE_SDK_FOLDER}/at-server
     ThirdParty/Seeed_Arduino_UltrasonicRanger
     ThirdParty/Wire/src
     ThirdParty/Arduino_LSM6DSOX/src  
-    ThirdParty/rp2040_DHT11_lib       
+    ThirdParty/rp2040_DHT11_lib
+    ThirdParty/PDM/src/include
 )
 
 include_directories(${INCLUDES})
@@ -98,11 +121,13 @@ RECURSIVE_FIND_FILE(PLATFORM_FILES "edge-impulse/ingestion-sdk-platform/raspberr
 RECURSIVE_FIND_FILE(SENSORS_FILES "edge-impulse/ingestion-sdk-platform/sensors" "*.cpp")
 RECURSIVE_FIND_FILE(REPL_FILES "edge-impulse/repl" "*.cpp")
 RECURSIVE_FIND_FILE(INGESTION_FILES "edge-impulse/ingestion-sdk-c/" "*.cpp")
+RECURSIVE_FIND_FILE(INFERENCE_FILES "edge-impulse/inference" "*.cpp")
 RECURSIVE_FIND_FILE(QCBOR_FILES "edge-impulse/QCBOR/src" "*.c")
 RECURSIVE_FIND_FILE(MBEDTLS_FILES "edge-impulse/mbedtls_hmac_sha256_sw/mbedtls/src" "*.c")
 RECURSIVE_FIND_FILE(PORTING_FILES "edge-impulse-sdk/porting/raspberry" "*.cpp")
 RECURSIVE_FIND_FILE(FIRMWARE_SDK_FILES "firmware-sdk" "*.cpp")
 RECURSIVE_FIND_FILE(THIRDPARTY_FILES "ThirdParty" "*.cpp")
+RECURSIVE_FIND_FILE(MIC_FILES "ThirdParty/PDM/src" "*.c")
 
 list(APPEND SOURCE_FILES ${S_FILES})
 list(APPEND SOURCE_FILES ${C_FILES})
@@ -113,13 +138,23 @@ list(APPEND SOURCE_FILES ${PLATFORM_FILES})
 list(APPEND SOURCE_FILES ${SENSORS_FILES})
 list(APPEND SOURCE_FILES ${REPL_FILES})
 list(APPEND SOURCE_FILES ${INGESTION_FILES})
+list(APPEND SOURCE_FILES ${INFERENCE_FILES})
 list(APPEND SOURCE_FILES ${QCBOR_FILES})
 list(APPEND SOURCE_FILES ${MBEDTLS_FILES})
 list(APPEND SOURCE_FILES ${PORTING_FILES})
 list(APPEND SOURCE_FILES ${FIRMWARE_SDK_FILES})
 list(APPEND SOURCE_FILES ${THIRDPARTY_FILES})
+list(APPEND SOURCE_FILES ${MIC_FILES})
 
 # add all sources to the project
 target_sources(ei_rp2040_firmware PRIVATE ${SOURCE_FILES})
 
 pico_add_extra_outputs(ei_rp2040_firmware)
+
+OPTION(DEFINE_UART_UPLOAD
+    "Replace Bootloader - will only accept firmware over UART"
+    OFF)
+IF(DEFINE_UART_UPLOAD)
+    MESSAGE("Adding UART_UPLOAD flag...")
+    pico_set_linker_script(ei_rp2040_firmware ${CMAKE_CURRENT_SOURCE_DIR}/uart_upload.ld)
+ENDIF(DEFINE_UART_UPLOAD)

@@ -51,11 +51,6 @@ typedef struct {
 } fft_complex_t;
 
 typedef struct {
-    int16_t r;
-    int16_t i;
-} fft_complex_i16_t;
-
-typedef struct {
     int32_t r;
     int32_t i;
 } fft_complex_i32_t;
@@ -142,86 +137,6 @@ typedef struct ei_matrix {
     }
 #endif // #ifdef __cplusplus
 } matrix_t;
-
-typedef struct ei_matrix_i16 {
-    EIDSP_i16 *buffer;
-    uint32_t rows;
-    uint32_t cols;
-    bool buffer_managed_by_me;
-
-#if EIDSP_TRACK_ALLOCATIONS
-    const char *_fn;
-    const char *_file;
-    int _line;
-    uint32_t _originally_allocated_rows;
-    uint32_t _originally_allocated_cols;
-#endif
-
-#ifdef __cplusplus
-    /**
-     * Create a new matrix
-     * @param n_rows Number of rows
-     * @param n_cols Number of columns
-     * @param a_buffer Buffer, if not provided we'll alloc on the heap
-     */
-    ei_matrix_i16(
-        uint32_t n_rows,
-        uint32_t n_cols,
-        EIDSP_i16 *a_buffer = NULL
-#if EIDSP_TRACK_ALLOCATIONS
-        ,
-        const char *fn = NULL,
-        const char *file = NULL,
-        int line = 0
-#endif
-        )
-    {
-        if (a_buffer) {
-            buffer = a_buffer;
-            buffer_managed_by_me = false;
-        }
-        else {
-            buffer = (EIDSP_i16*)ei_calloc(n_rows * n_cols * sizeof(EIDSP_i16), 1);
-            buffer_managed_by_me = true;
-        }
-        rows = n_rows;
-        cols = n_cols;
-
-        if (!a_buffer) {
-#if EIDSP_TRACK_ALLOCATIONS
-            _fn = fn;
-            _file = file;
-            _line = line;
-            _originally_allocated_rows = rows;
-            _originally_allocated_cols = cols;
-            if (_fn) {
-                ei_dsp_register_matrix_alloc_internal(fn, file, line, rows, cols, sizeof(EIDSP_i16), buffer);
-            }
-            else {
-                ei_dsp_register_matrix_alloc(rows, cols, sizeof(EIDSP_i16), buffer);
-            }
-#endif
-        }
-    }
-
-    ~ei_matrix_i16() {
-        if (buffer && buffer_managed_by_me) {
-            ei_free(buffer);
-
-#if EIDSP_TRACK_ALLOCATIONS
-            if (_fn) {
-                ei_dsp_register_matrix_free_internal(_fn, _file, _line, _originally_allocated_rows,
-                    _originally_allocated_cols, sizeof(EIDSP_i16), buffer);
-            }
-            else {
-                ei_dsp_register_matrix_free(_originally_allocated_rows, _originally_allocated_cols,
-                    sizeof(EIDSP_i16), buffer);
-            }
-#endif
-        }
-    }
-#endif // #ifdef __cplusplus
-} matrix_i16_t;
 
 typedef struct ei_matrix_i32 {
     EIDSP_i32 *buffer;

@@ -20,18 +20,35 @@
  * SOFTWARE.
  */
 
+#include <string>
 #include "ei_at_handlers.h"
 #include "ei_device_raspberry_rp2040.h"
-#include "ei_rp2040_fs_commands.h"
+#include "ei_device_lib.h"
 
 #include "edge-impulse-sdk/porting/ei_classifier_porting.h"
-#include "edge-impulse-sdk/porting/lib/at_base64_lib.h"
 
 #include "ei_at_command_set.h"
 #include "ei_at_server.h"
-#include "ei_config.h"
 #include "ei_fusion.h"
+#include "ei_image_lib.h"
+
 #include "ei_run_impulse.h"
+
+#include "model-parameters/model_metadata.h"
+
+#include "pico/bootrom.h"
+
+using namespace std;
+
+EiDeviceRP2040* dev = static_cast<EiDeviceRP2040*>(EiDeviceRP2040::get_device());
+EiDeviceMemory* mem = dev->get_memory();
+
+// Helper functions
+
+static void at_error_not_implemented()
+{
+    ei_printf("Command not implemented\r\n");
+}
 
 static inline bool check_args_num(const int &required, const int &received)
 {
@@ -43,272 +60,160 @@ static inline bool check_args_num(const int &required, const int &received)
     return true;
 }
 
-static bool at_clear_config(void)
+// AT Server functions
+
+static bool at_bootmode(void)
 {
-    ei_printf("Clearing config and restarting system...\n");
-    ei_config_clear();
+    ei_printf("ENTERING BOOTLOADER\n");
+    ei_sleep(100);
+
+    reset_usb_boot(1u, 0);
+    return true;
+}
+
+bool at_get_device_id(void)
+{
+    ei_printf("%s\n", dev->get_device_id().c_str());
 
     return true;
 }
 
-static bool at_device_info(void)
+bool at_set_device_id(const char **argv, const int argc)
 {
-    uint8_t id_buffer[32] = { 0 };
-    size_t id_size;
-    int r = ei_config_get_device_id(id_buffer, &id_size);
-    if (r == EI_CONFIG_OK) {
-        id_buffer[id_size] = 0;
-        ei_printf("ID:         %s\n", id_buffer);
-    }
-    if (ei_config_get_context()->get_device_type == NULL) {
-        return true;
-    }
-    r = ei_config_get_context()->get_device_type(id_buffer, &id_size);
-    if (r == EI_CONFIG_OK) {
-        id_buffer[id_size] = 0;
-        ei_printf("Type:       %s\n", id_buffer);
-    }
-    ei_printf("AT Version: %s\n", AT_COMMAND_VERSION);
+    check_args_num(1, argc);
 
-    ei_device_data_output_baudrate_t baudrate;
-    r = EiDevice.get_data_output_baudrate(&baudrate);
-    if (r == 0) {
-        ei_printf("Data Transfer Baudrate: %s\r\n", baudrate.str);
-    }
-    else {
-        ei_printf("Data Transfer Baudrate: UNKNOWN\r\n");
-    }
-    return true;
-}
+    dev->set_device_id(argv[0]);
 
-static bool at_get_sample_settings(void)
-{
-    char *label;
-    float interval;
-    uint32_t length;
-    char *hmac_key;
-
-    EI_CONFIG_ERROR r = ei_config_get_sample_settings(&label, &interval, &length, &hmac_key);
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to retrieve sample settings (%d)\n", r);
-        return true;
-    }
-    ei_printf("Label:     %s\n", label);
-    ei_printf("Interval:  ");
-    ei_printf_float((float)interval);
-    ei_printf("ms.\n");
-    ei_printf("Length:    %lu ms.\n", length);
-    ei_printf("HMAC key:  %s\n", hmac_key);
-    return true;
-}
-
-static bool at_set_sample_settings(const char **argv, const int argc)
-{
-    if (check_args_num(3, argc) == false) {
-        return true;
-    }
-
-    float interval = atof(argv[1]);
-    uint32_t length = (uint32_t)atoi(argv[2]);
-    EI_CONFIG_ERROR r;
-
-    if (argc == 3) {
-        r = ei_config_set_sample_settings(argv[0], interval, length);
-    }
-    else if (argc >= 4) {
-        //TODO: check if last rgv is not modified and fix ei_config_set_sample_settings declaration
-        r = ei_config_set_sample_settings(argv[0], interval, length, (char *)argv[3]);
-    }
-    else {
-        ei_printf("Incorrect number of arguments (at least 3)\n");
-        return true;
-    }
-
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to persist sampling settings (%d)\n", r);
-    }
-    else {
-        ei_printf("OK\n");
-    }
+    ei_printf("OK\n");
 
     return true;
 }
 
-static bool at_get_upload_settings(void)
+bool at_get_upload_host(void)
 {
-    char *api_key;
-    char *host;
-    char *path;
-
-    EI_CONFIG_ERROR r = ei_config_get_upload_settings(&api_key, &host, &path);
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to retrieve upload settings (%d)\n", r);
-        return true;
-    }
-    ei_printf("Api Key:   %s\n", api_key);
-    ei_printf("Host:      %s\n", host);
-    ei_printf("Path:      %s\n", path);
+    ei_printf("%s\n", dev->get_upload_host().c_str());
 
     return true;
 }
 
-static bool at_set_upload_settings(const char **argv, const int argc)
+bool at_set_upload_host(const char **argv, const int argc)
 {
-    if (check_args_num(2, argc) == false) {
+    if (argc < 1) {
+        ei_printf("Missing argument!\n");
         return true;
     }
 
-    EI_CONFIG_ERROR r = ei_config_set_upload_path_settings(argv[0], argv[1]);
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to persist upload settings (%d)\n", r);
-    }
-    else {
-        ei_printf("OK\n");
-    }
-    return true;
-}
+    dev->set_upload_host(argv[0]);
 
-static bool at_set_upload_host(const char **argv, const int argc)
-{
-    if (check_args_num(1, argc) == false) {
-        return true;
-    }
-
-    EI_CONFIG_ERROR r = ei_config_set_upload_host_settings(argv[0]);
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to persist upload settings (%d)\n", r);
-    }
-    else {
-        ei_printf("OK\n");
-    }
+    ei_printf("OK\n");
 
     return true;
 }
 
-static bool at_get_mgmt_settings(void)
+bool at_get_upload_settings(void)
 {
-    char *mgmt_url;
-    bool is_connected;
-    char last_error[128] = { '\0' };
-
-    EI_CONFIG_ERROR r = ei_config_get_mgmt_settings(&mgmt_url, &is_connected, last_error, 128);
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to retrieve management settings (%d)\n", r);
-        return true;
-    }
-    ei_printf("URL:        %s\n", mgmt_url);
-    ei_printf("Connected:  %d\n", is_connected);
-    ei_printf("Last error: %s\n", last_error);
+    ei_printf("Api Key:   %s\n", dev->get_upload_api_key().c_str());
+    ei_printf("Host:      %s\n", dev->get_upload_host().c_str());
+    ei_printf("Path:      %s\n", dev->get_upload_path().c_str());
 
     return true;
 }
 
-static bool at_set_mgmt_settings(const char **argv, const int argc)
+bool at_set_upload_settings(const char **argv, const int argc)
 {
-    if (check_args_num(1, argc) == false) {
+    if (argc < 2) {
+        ei_printf("Missing argument! Required: " AT_UPLOADSETTINGS_ARGS "\n");
         return true;
     }
 
-    EI_CONFIG_ERROR r = ei_config_set_mgmt_settings(argv[0]);
-    if (r != EI_CONFIG_OK) {
-        ei_printf("Failed to persist management settings (%d)\n", r);
-    }
-    else {
-        ei_printf("OK\n");
-    }
+    //TODO: can we set these values to ""?
+    dev->set_upload_api_key(argv[0]);
+    dev->set_upload_path(argv[1]);
+
+    ei_printf("OK\n");
 
     return true;
 }
 
-static bool at_list_sensors(void)
+bool at_get_mgmt_url(void)
 {
-    const ei_device_sensor_t *list;
-    size_t list_size;
-
-    int r = EiDevice.get_sensor_list((const ei_device_sensor_t **)&list, &list_size);
-    if (r != 0) {
-        ei_printf("Failed to get sensor list (%d)\n", r);
-        return true;
-    }
-
-    for (size_t ix = 0; ix < list_size; ix++) {
-        ei_printf(
-            "Name: %s, Max sample length: %hus, Frequencies: [",
-            list[ix].name,
-            list[ix].max_sample_length_s);
-        for (size_t fx = 0; fx < EI_MAX_FREQUENCIES; fx++) {
-            if (list[ix].frequencies[fx] != 0.0f) {
-                if (fx != 0) {
-                    ei_printf(", ");
-                }
-                ei_printf_float(list[ix].frequencies[fx]);
-                ei_printf("Hz");
-            }
-        }
-        ei_printf("]\n");
-    }
+    ei_printf("%s\n", dev->get_management_url().c_str());
 
     return true;
 }
 
-static void at_list_fusion_sensors()
+bool at_set_mgmt_url(const char **argv, const int argc)
 {
-    ei_built_sensor_fusion_list();
-}
-
-static void at_read_file_data(uint8_t *buffer, size_t size)
-{
-    base64_encode((const char *)buffer, size, ei_putchar);
-}
-
-static bool at_read_file(const char **argv, const int argc)
-{
-    if (check_args_num(1, argc) == false) {
+    if (argc < 1) {
+        ei_printf("Missing argument!\n");
         return true;
     }
 
-    // second argument is optional, so check if we have it
-    bool use_max_baudrate = false;
-    if (argc >= 2 && argv[1][0] == 'y') {
-        use_max_baudrate = true;
-    }
+    dev->set_management_url(argv[0]);
 
-    // setup data output baudrate
-    if (use_max_baudrate) {
-        // sleep a little to let the daemon attach on the new baud rate...
-        ei_printf("OK\r\n");
-
-        EiDevice.set_max_data_output_baudrate();
-        EiDevice.delay_ms(100);
-    }
-
-    bool exists = ei_config_get_context()->read_file(argv[0], at_read_file_data);
-
-    if (use_max_baudrate) {
-        // lower baud rate
-        ei_printf("\r\nOK\r\n");
-
-        EiDevice.set_default_data_output_baudrate();
-
-        // give some time to re-attach
-        EiDevice.delay_ms(100);
-    }
-
-    if (!exists) {
-        ei_printf("File '%s' does not exist\n", argv[0]);
-    }
-    else {
-        ei_printf("\n");
-    }
+    ei_printf("OK\n");
 
     return true;
 }
 
-static bool at_read_buffer(const char **argv, const int argc)
+bool at_get_sample_settings(void)
 {
-    if (check_args_num(2, argc) == false) {
+    ei_printf("Label:     %s\n", dev->get_sample_label().c_str());
+    ei_printf("Interval:  %.2f ms.\n", dev->get_sample_interval_ms());
+    ei_printf("Length:    %lu ms.\n", dev->get_sample_length_ms());
+    ei_printf("HMAC key:  %s\n", dev->get_sample_hmac_key().c_str());
+
+    return true;
+}
+
+bool at_set_sample_settings(const char **argv, const int argc)
+{
+    if (argc < 3) {
+        ei_printf("Missing argument! Required: " AT_SAMPLESETTINGS_ARGS "\n");
         return true;
     }
+
+    dev->set_sample_label(argv[0]);
+
+    //TODO: sanity check and/or exception handling
+    string interval_ms_str(argv[1]);
+    dev->set_sample_interval_ms(stof(interval_ms_str));
+
+    //TODO: sanity check and/or exception handling
+    string sample_length_str(argv[2]);
+    dev->set_sample_length_ms(stoi(sample_length_str));
+
+    if (argc >= 4) {
+        dev->set_sample_hmac_key(argv[3]);
+    }
+
+    ei_printf("OK\n");
+
+    return true;
+}
+
+bool at_clear_config(void)
+{
+    dev->clear_config();
+    dev->init_device_id();
+
+    return true;
+}
+
+bool at_unlink_file(const char **argv, const int argc)
+{
+    ei_printf("\n");
+
+    return true;
+}
+
+bool at_read_buffer(const char **argv, const int argc)
+{
+    if (argc < 2) {
+        ei_printf("Missing argument! Required: " AT_READBUFFER_ARGS "\n");
+        return true;
+    }
+    bool success = true;
 
     size_t start = (size_t)atoi(argv[0]);
     size_t length = (size_t)atoi(argv[1]);
@@ -318,27 +223,20 @@ static bool at_read_buffer(const char **argv, const int argc)
         use_max_baudrate = true;
     }
 
-    // setup data output baudrate
     if (use_max_baudrate) {
-
-        // sleep a little to let the daemon attach on the new baud rate...
         ei_printf("OK\r\n");
-        EiDevice.delay_ms(100);
-        EiDevice.set_max_data_output_baudrate();
-        EiDevice.delay_ms(100);
+        ei_sleep(100);
+        dev->set_max_data_output_baudrate();
+        ei_sleep(100);
     }
 
-    bool success = ei_config_get_context()->read_buffer(start, length, at_read_file_data);
+    success = read_encode_send_sample_buffer(start, length);
 
     if (use_max_baudrate) {
-        // lower baud rate
         ei_printf("\r\nOK\r\n");
-
-        EiDevice.delay_ms(100);
-        EiDevice.set_default_data_output_baudrate();
-
-        // give some time to re-attach
-        EiDevice.delay_ms(100);
+        ei_sleep(100);
+        dev->set_default_data_output_baudrate();
+        ei_sleep(100);
     }
 
     if (!success) {
@@ -351,93 +249,7 @@ static bool at_read_buffer(const char **argv, const int argc)
     return true;
 }
 
-static bool at_sample_start(const char **argv, const int argc)
-{
-    if (check_args_num(1, argc) == false) {
-        return true;
-    }
-
-    bool ret;
-    const ei_device_sensor_t *list;
-    size_t list_size;
-
-    int r = EiDevice.get_sensor_list((const ei_device_sensor_t **)&list, &list_size);
-    if (r != 0) {
-        ei_printf("Failed to get sensor list (%d)\n", r);
-        return true;
-    }
-
-    for (size_t ix = 0; ix < list_size; ix++) {
-        if (strcmp(list[ix].name, argv[0]) == 0) {
-            bool r = list[ix].start_sampling_cb();
-            if (!r) {
-                ei_printf("Failed to start sampling\n");
-            }
-            return true;
-        }
-    }
-
-    if (ei_connect_fusion_list(argv[0], SENSOR_FORMAT)) {
-        ret = ei_fusion_setup_data_sampling();
-        if (!ret) {
-            ei_printf("ERR: Failed to start sensor fusion sampling\n");
-        }
-        return true;
-    }
-
-    ei_printf("Failed to find sensor '%s' in the sensor list\n", argv[0]);
-
-    return true;
-}
-
-static bool at_list_config(void)
-{
-    ei_printf("===== Device info =====\n");
-    at_device_info();
-    ei_printf("\n");
-    ei_printf("===== Sensors ======\n");
-    at_list_sensors();
-    at_list_fusion_sensors();
-    ei_printf("\n");
-    ei_printf("===== Snapshot ======\n");
-    ei_printf("Has snapshot:    0\n");
-    ei_printf("\n");
-    ei_printf("===== WIFI =====\n");
-    ei_printf("SSID:      \n");
-    ei_printf("Password:  \n");
-    ei_printf("Security:  0\n");
-    ei_printf("MAC:       00:00:00:00:00:00\n");
-    ei_printf("Connected: 0\n");
-    ei_printf("Present:   0\n");
-    ei_printf("\n");
-    ei_printf("===== Sampling parameters =====\n");
-    at_get_sample_settings();
-    ei_printf("\n");
-    ei_printf("===== Upload settings =====\n");
-    at_get_upload_settings();
-    ei_printf("\n");
-    ei_printf("===== Remote management =====\n");
-    at_get_mgmt_settings();
-    ei_printf("\n");
-
-    return true;
-}
-
-static bool at_unlink_file(const char **argv, const int argc)
-{
-    ei_printf("\n");
-
-    return true;
-}
-
-/* help function for list files which is not currently implemented */
-void list_files_help_fn(void (*data_fn)(char *))
-{
-    char no_files[] = "No files";
-    data_fn(no_files);
-}
-
-static bool at_read_raw(const char **argv, const int argc)
+bool at_read_raw(const char **argv, const int argc)
 {
 
     if (check_args_num(2, argc) == false) {
@@ -447,59 +259,176 @@ static bool at_read_raw(const char **argv, const int argc)
     size_t start = (size_t)atoi(argv[0]);
     size_t length = (size_t)atoi(argv[1]);
 
-    char buffer[32];
+    uint8_t buffer[32];
 
     int count = 0;
     int n_display_bytes = 16;
 
-    for (start; start < length; start += n_display_bytes) {
-        ei_rp2040_fs_read_sample_data(buffer, start, n_display_bytes);
+    for (; start < length; start += n_display_bytes) {
+        mem->read_sample_data(buffer, start, n_display_bytes);
 
         for (int i = 0; i < n_display_bytes; i++) {
             ei_printf("%02x", buffer[i]);
             if (i % 16 == 15)
-                printf("\n");
+                ei_printf("\n");
             else
-                printf(" ");
+                ei_printf(" ");
+        }  
+    }
+    ei_printf("\n");
+
+    return true;
+}
+
+bool at_sample_start(const char **argv, const int argc)
+{
+    if (argc < 1) {
+        ei_printf("Missing sensor name!\n");
+        return true;
+    }
+
+    const ei_device_sensor_t *sensor_list;
+    size_t sensor_list_size;
+
+    dev->get_sensor_list((const ei_device_sensor_t **)&sensor_list, &sensor_list_size);
+
+    for (size_t ix = 0; ix < sensor_list_size; ix++) {
+        if (strcmp(sensor_list[ix].name, argv[0]) == 0) {
+            if (!sensor_list[ix].start_sampling_cb()) {
+                ei_printf("ERR: Failed to start sampling\n");
+            }
+            return true;
         }
     }
 
-    return true;
-}
-
-static bool at_run_nn_normal(void)
-{
-    run_nn_normal();
-    return true;
-}
-
-ATServer *ei_at_init(void)
-{
-    ATServer *at;
-
-    /* Initialize configuration */
-    static ei_config_ctx_t config_ctx = { 0 };
-    config_ctx.get_device_id = EiDevice.get_id_function();
-    config_ctx.get_device_type = EiDevice.get_type_function();
-    config_ctx.wifi_connection_status = EiDevice.get_wifi_connection_status_function();
-    config_ctx.wifi_present = EiDevice.get_wifi_present_status_function();
-    config_ctx.load_config = &ei_rp2040_fs_load_config;
-    config_ctx.save_config = &ei_rp2040_fs_save_config;
-    config_ctx.list_files = list_files_help_fn;
-    config_ctx.read_buffer = EiDevice.get_read_sample_buffer_function();
-
-    EI_CONFIG_ERROR cr = ei_config_init(&config_ctx);
-
-    if (cr != EI_CONFIG_OK) {
-        ei_printf("Failed to initialize configuration (%d)\n", cr);
+    if (ei_connect_fusion_list(argv[0], SENSOR_FORMAT)) {
+        if (!ei_fusion_setup_data_sampling()) {
+            ei_printf("ERR: Failed to start sensor fusion sampling\n");
+        }
     }
     else {
-        ei_printf("Loaded configuration\n");
+        ei_printf("ERR: Failed to find sensor '%s' in the sensor list\n", argv[0]);
     }
+
+    return true;
+}
+
+bool at_run_impulse(void)
+{
+    ei_start_impulse(false, false);
+
+    return true;
+}
+
+bool at_run_impulse_debug(const char **argv, const int argc)
+{
+    bool use_max_uart_speed = false;
+    if (argc > 0 && argv[0][0] == 'y') {
+        use_max_uart_speed = true;
+    }
+
+    ei_start_impulse(false, true, use_max_uart_speed);
+
+    return true;
+}
+
+bool at_run_impulse_cont(void)
+{
+    ei_start_impulse(true, false);
+
+    return true;
+}
+
+bool at_stop_impulse(void)
+{
+    ei_stop_impulse();
+
+    return true;
+}
+
+bool at_get_config(void)
+{
+    dev->load_config();
+    
+    const ei_device_sensor_t *sensor_list;
+    size_t sensor_list_size;
+
+    dev->get_sensor_list((const ei_device_sensor_t **)&sensor_list, &sensor_list_size);
+
+    ei_printf("===== Device info =====\n");
+    ei_printf("ID:         %s\n", dev->get_device_id().c_str());
+    ei_printf("Type:       %s\n", dev->get_device_type().c_str());
+    ei_printf("AT Version: " AT_COMMAND_VERSION "\n");
+    ei_printf("Data Transfer Baudrate: %lu\n", dev->get_data_output_baudrate());
+    ei_printf("\n");
+    ei_printf("===== Sensors ======\n");
+    //TODO: move it to Sensor Manager
+    for (size_t ix = 0; ix < sensor_list_size; ix++) {
+        ei_printf(
+            "Name: %s, Max sample length: %hus, Frequencies: [",
+            sensor_list[ix].name,
+            sensor_list[ix].max_sample_length_s);
+        for (size_t fx = 0; fx < EI_MAX_FREQUENCIES; fx++) {
+            if (sensor_list[ix].frequencies[fx] != 0.0f) {
+                if (fx != 0) {
+                    ei_printf(", ");
+                }
+                ei_printf("%.2fHz", sensor_list[ix].frequencies[fx]);
+            }
+        }
+        ei_printf("]\n");
+    }
+    ei_built_sensor_fusion_list();
+    ei_printf("\n");
+    ei_printf("===== Snapshot ======\n");
+    ei_printf("\n");
+    ei_printf("===== Inference ======\n");
+    ei_printf("Sensor:           %d\r\n", EI_CLASSIFIER_SENSOR);
+#if EI_CLASSIFIER_OBJECT_DETECTION_CONSTRAINED == 1
+    const char *model_type = "constrained_object_detection";
+#elif EI_CLASSIFIER_OBJECT_DETECTION
+    const char *model_type = "object_detection";
+#else
+    const char *model_type = "classification";
+#endif
+    ei_printf("Model type:       %s\r\n", model_type);
+    ei_printf("\n");
+    ei_printf("===== WIFI =====\n");
+    ei_printf("SSID:      \n");
+    ei_printf("Password:  \n");
+    ei_printf("Security:  0\n");
+    ei_printf("MAC:       %s\n", dev->get_device_id().c_str());
+    ei_printf("Connected: 0\n");
+    ei_printf("Present:   0\n");
+    ei_printf("\n");
+    ei_printf("===== Sampling parameters =====\n");
+    ei_printf("Label:     %s\n", dev->get_sample_label().c_str());
+    ei_printf("Interval:  %.2f ms.\n", dev->get_sample_interval_ms());
+    ei_printf("Length:    %lu ms.\n", dev->get_sample_length_ms());
+    ei_printf("HMAC key:  %s\n", dev->get_sample_hmac_key().c_str());
+    ei_printf("\n");
+    ei_printf("===== Upload settings =====\n");
+    ei_printf("Api Key:   %s\n", dev->get_upload_api_key().c_str());
+    ei_printf("Host:      %s\n", dev->get_upload_host().c_str());
+    ei_printf("Path:      %s\n", dev->get_upload_path().c_str());
+    ei_printf("\n");
+    ei_printf("===== Remote management =====\n");
+    ei_printf("URL:        %s\n", dev->get_management_url().c_str());
+    ei_printf("Connected:  0\n");
+    ei_printf("Last error: \n");
+    ei_printf("\n");
+
+    return true;
+}
+
+ATServer *ei_at_init(EiDeviceRP2040 *device)
+{
+    ATServer *at;
+    dev = device;
 
     at = ATServer::get_instance();
 
-    at->register_command(AT_CONFIG, AT_CONFIG_HELP_TEXT, nullptr, at_list_config, nullptr, nullptr);
+    at->register_command(AT_CONFIG, AT_CONFIG_HELP_TEXT, nullptr, at_get_config, nullptr, nullptr);
     at->register_command(
         AT_SAMPLESTART,
         AT_SAMPLESTART_HELP_TEXT,
@@ -515,18 +444,11 @@ ATServer *ei_at_init(void)
         at_read_buffer,
         AT_READBUFFER_ARGS);
     at->register_command(
-        AT_READFILE,
-        AT_READFILE_HELP_TEXT,
-        nullptr,
-        nullptr,
-        at_read_file,
-        AT_READFILE_ARGS);
-    at->register_command(
         AT_MGMTSETTINGS,
         AT_MGMTSETTINGS_HELP_TEXT,
         nullptr,
-        at_get_mgmt_settings,
-        at_set_mgmt_settings,
+        at_get_mgmt_url,
+        at_set_mgmt_url,
         AT_MGMTSETTINGS_ARGS);
     at->register_command(
         AT_CLEARCONFIG,
@@ -535,6 +457,13 @@ ATServer *ei_at_init(void)
         nullptr,
         nullptr,
         nullptr);
+    at->register_command(
+        AT_DEVICEID,
+        AT_DEVICEID_HELP_TEXT,
+        nullptr,
+        at_get_device_id,
+        at_set_device_id,
+        AT_DEVICEID_ARGS);
     at->register_command(
         AT_SAMPLESETTINGS,
         AT_SAMPLESETTINGS_HELP_TEXT,
@@ -553,7 +482,7 @@ ATServer *ei_at_init(void)
         AT_UPLOADHOST,
         AT_UPLOADHOST_HELP_TEXT,
         nullptr,
-        nullptr,
+        at_get_upload_host,
         at_set_upload_host,
         AT_UPLOADHOST_ARGS);
     at->register_command(
@@ -564,21 +493,39 @@ ATServer *ei_at_init(void)
         at_unlink_file,
         AT_UNLINKFILE_ARGS);
     at->register_command(
+        AT_RUNIMPULSE,
+        AT_RUNIMPULSE_HELP_TEXT,
+        at_run_impulse,
+        nullptr,
+        nullptr,
+        nullptr);
+    at->register_command(
+        AT_RUNIMPULSEDEBUG,
+        AT_RUNIMPULSEDEBUG_HELP_TEXT,
+        nullptr,
+        nullptr,
+        at_run_impulse_debug,
+        AT_RUNIMPULSEDEBUG_ARGS);
+    at->register_command(
+        AT_RUNIMPULSECONT,
+        AT_RUNIMPULSECONT_HELP_TEXT,
+        at_run_impulse_cont,
+        nullptr,
+        nullptr,
+        nullptr);
+    at->register_command(
         AT_READRAW,
         AT_READRAW_HELP_TEXT,
         nullptr,
         nullptr,
         at_read_raw,
         AT_READRAW_ARS);
-
     at->register_command(
-        "RUNIMPULSE",
-        "Run the impulse",
-        at_run_nn_normal,
+        AT_BOOTMODE,
+        AT_BOOTMODE_HELP_TEXT,
+        at_bootmode,
         nullptr,
         nullptr,
         nullptr);
-    //at->register_command(RUNIMPULSECONT, "Run the impulse continuously", nullptr, nullptr, at_run_nn_continuous_normal, AT_RUNIMPULSECONT_ARGS);
-
     return at;
 }

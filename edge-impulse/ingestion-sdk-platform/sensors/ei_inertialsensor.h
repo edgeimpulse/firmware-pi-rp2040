@@ -46,9 +46,9 @@ static const ei_device_fusion_sensor_t inertial_sensor = {
         { "accX", "m/s2" },
         { "accY", "m/s2" },
         { "accZ", "m/s2" },
-        { "gyrX", "m/s2" },
-        { "gyrY", "m/s2" },
-        { "gyrZ", "m/s2" },
+        { "gyrX", "deg/s" },
+        { "gyrY", "deg/s" },
+        { "gyrZ", "deg/s" },
     },
     // reference to read data function
     &ei_fusion_inertial_sensor_read_data

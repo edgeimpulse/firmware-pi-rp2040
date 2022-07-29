@@ -152,50 +152,7 @@ __attribute__((unused)) int extract_spectral_analysis_features(signal_t *signal,
     return EIDSP_OK;
 }
 
-__attribute__((unused)) matrix_i16_t *create_edges_matrix(ei_dsp_config_spectral_analysis_t config, const float sampling_freq)
-{
-    // the spectral edges that we want to calculate
-    static matrix_i16_t edges_matrix_in(64, 1);
-    static bool matrix_created = false;
-    size_t edge_matrix_ix = 0;
 
-    if(matrix_created == false) {
-
-        char spectral_str[128] = { 0 };
-        if (strlen(config.spectral_power_edges) > sizeof(spectral_str) - 1) {
-            return NULL;
-        }
-        memcpy(spectral_str, config.spectral_power_edges, strlen(config.spectral_power_edges));
-
-        // convert spectral_power_edges (string) into float array
-        char *spectral_ptr = spectral_str;
-        while (spectral_ptr != NULL) {
-            while((*spectral_ptr) == ' ') {
-                spectral_ptr++;
-            }
-
-            float edge = (atof(spectral_ptr) / (float)(sampling_freq/2.f));
-            numpy::float_to_int16(&edge, &edges_matrix_in.buffer[edge_matrix_ix++], 1);
-
-            // find next (spectral) delimiter (or '\0' character)
-            while((*spectral_ptr != ',')) {
-                spectral_ptr++;
-                if (*spectral_ptr == '\0') break;
-            }
-
-            if (*spectral_ptr == '\0') {
-                spectral_ptr = NULL;
-            }
-            else  {
-                spectral_ptr++;
-            }
-        }
-        edges_matrix_in.rows = edge_matrix_ix;
-        matrix_created = true;
-    }
-
-    return &edges_matrix_in;
-}
 
 __attribute__((unused)) int extract_raw_features(signal_t *signal, matrix_t *output_matrix, void *config_ptr, const float frequency) {
     ei_dsp_config_raw_t config = *((ei_dsp_config_raw_t*)config_ptr);
@@ -226,6 +183,7 @@ __attribute__((unused)) int extract_raw_features(signal_t *signal, matrix_t *out
 
     return EIDSP_OK;
 }
+
 
 __attribute__((unused)) int extract_flatten_features(signal_t *signal, matrix_t *output_matrix, void *config_ptr, const float frequency) {
     ei_dsp_config_flatten_t config = *((ei_dsp_config_flatten_t*)config_ptr);
@@ -340,7 +298,7 @@ __attribute__((unused)) int extract_mfcc_features(signal_t *signal, matrix_t *ou
         EIDSP_ERR(EIDSP_MATRIX_SIZE_MISMATCH);
     }
 
-    if(config.implementation_version != 1 && config.implementation_version != 2) {
+    if((config.implementation_version == 0) || (config.implementation_version > 3)) {
         EIDSP_ERR(EIDSP_BLOCK_VERSION_INCORRECT);
     }
 
@@ -449,7 +407,7 @@ __attribute__((unused)) int extract_mfcc_per_slice_features(signal_t *signal, ma
         EIDSP_ERR(EIDSP_MATRIX_SIZE_MISMATCH);
     }
 
-    if(config.implementation_version != 1 && config.implementation_version != 2) {
+    if((config.implementation_version == 0) || (config.implementation_version > 3)) {
         EIDSP_ERR(EIDSP_BLOCK_VERSION_INCORRECT);
     }
 
@@ -1293,7 +1251,67 @@ __attribute__((unused)) int extract_image_features(signal_t *signal, matrix_t *o
     return EIDSP_OK;
 }
 
-#if EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#if (EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1) && (EI_CLASSIFIER_INFERENCING_ENGINE == EI_CLASSIFIER_DRPAI)
+
+__attribute__((unused)) int extract_drpai_features_quantized(signal_t *signal, matrix_i8_t *output_matrix, void *config_ptr, const float frequency) {
+    ei_dsp_config_image_t config = *((ei_dsp_config_image_t*)config_ptr);
+
+    int16_t channel_count = strcmp(config.channels, "Grayscale") == 0 ? 1 : 3;
+
+    if (output_matrix->rows * output_matrix->cols != static_cast<uint32_t>(EI_CLASSIFIER_INPUT_WIDTH * EI_CLASSIFIER_INPUT_HEIGHT * channel_count)) {
+        ei_printf("out_matrix = %d items\n", static_cast<int>(output_matrix->rows * output_matrix->cols));
+        ei_printf("calculated size = %d items\n", static_cast<int>(EI_CLASSIFIER_INPUT_WIDTH * EI_CLASSIFIER_INPUT_HEIGHT * channel_count));
+        EIDSP_ERR(EIDSP_MATRIX_SIZE_MISMATCH);
+    }
+
+    size_t output_ix = 0;
+
+#if defined(EI_DSP_IMAGE_BUFFER_STATIC_SIZE)
+    const size_t page_size = EI_DSP_IMAGE_BUFFER_STATIC_SIZE;
+#else
+    const size_t page_size = 1024;
+#endif
+
+    // buffered read from the signal
+    size_t bytes_left = signal->total_length;
+    for (size_t ix = 0; ix < signal->total_length; ix += page_size) {
+        size_t elements_to_read = bytes_left > page_size ? page_size : bytes_left;
+
+#if defined(EI_DSP_IMAGE_BUFFER_STATIC_SIZE)
+        matrix_t input_matrix(elements_to_read, config.axes, ei_dsp_image_buffer);
+#else
+        matrix_t input_matrix(elements_to_read, config.axes);
+#endif
+        if (!input_matrix.buffer) {
+            EIDSP_ERR(EIDSP_OUT_OF_MEM);
+        }
+        signal->get_data(ix, elements_to_read, input_matrix.buffer);
+
+        for (size_t jx = 0; jx < elements_to_read; jx++) {
+            uint32_t pixel = static_cast<uint32_t>(input_matrix.buffer[jx]);
+
+            if (channel_count == 3) {
+                int32_t r = static_cast<int32_t>(pixel >> 16 & 0xff);
+                int32_t g = static_cast<int32_t>(pixel >> 8 & 0xff);
+                int32_t b = static_cast<int32_t>(pixel & 0xff);
+
+                output_matrix->buffer[output_ix++] = static_cast<int8_t>(r);
+                output_matrix->buffer[output_ix++] = static_cast<int8_t>(g);
+                output_matrix->buffer[output_ix++] = static_cast<int8_t>(b);
+            }
+            else {
+                //NOTE: not implementing greyscale yet
+            }
+        }
+        bytes_left -= elements_to_read;
+    }
+
+    return EIDSP_OK;
+}
+
+#endif //(EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1) && (EI_CLASSIFIER_INFERENCING_ENGINE == EI_CLASSIFIER_DRPAI)
+
+#if (EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1) && (EI_CLASSIFIER_INFERENCING_ENGINE != EI_CLASSIFIER_DRPAI)
 
 __attribute__((unused)) int extract_image_features_quantized(signal_t *signal, matrix_i8_t *output_matrix, void *config_ptr, const float frequency) {
     ei_dsp_config_image_t config = *((ei_dsp_config_image_t*)config_ptr);
@@ -1393,7 +1411,7 @@ __attribute__((unused)) int extract_image_features_quantized(signal_t *signal, m
 
     return EIDSP_OK;
 }
-#endif // EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#endif // (EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1) && (EI_CLASSIFIER_INFERENCING_ENGINE != EI_CLASSIFIER_DRPAI)
 
 /**
  * Clear all state regarding continuous audio. Invoke this function after continuous audio loop ends.

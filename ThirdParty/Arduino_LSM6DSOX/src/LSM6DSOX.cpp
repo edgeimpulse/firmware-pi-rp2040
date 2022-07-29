@@ -237,3 +237,4 @@ int LSM6DSOXClass::writeRegister(uint8_t address, uint8_t value)
 }
 
 LSM6DSOXClass IMU(Wire, LSM6DSOX_ADDRESS);
+LSM6DSOXClass IMU1(Wire1, LSM6DSOX_ADDRESS);

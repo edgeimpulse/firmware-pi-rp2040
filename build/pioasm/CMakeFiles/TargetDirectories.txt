@@ -1,0 +1,3 @@
+/Users/dmitrymaslov/github/edgeimpulse-rp2040/firmware-pi-rp2040/build/pioasm/CMakeFiles/pioasm.dir
+/Users/dmitrymaslov/github/edgeimpulse-rp2040/firmware-pi-rp2040/build/pioasm/CMakeFiles/edit_cache.dir
+/Users/dmitrymaslov/github/edgeimpulse-rp2040/firmware-pi-rp2040/build/pioasm/CMakeFiles/rebuild_cache.dir

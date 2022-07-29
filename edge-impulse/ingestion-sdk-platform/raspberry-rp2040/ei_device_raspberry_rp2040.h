@@ -26,22 +26,23 @@
 /* Include ----------------------------------------------------------------- */
 #include "ei_classifier_porting.h"
 #include "ei_device_info_lib.h"
+#include "pico/stdlib.h"
 
 /** Baud rates */
 #define DEFAULT_BAUD 115200
-#define MAX_BAUD     921600
+#define MAX_BAUD     115200
 
 /** Number of sensors used */
 #define EI_DEVICE_N_SENSORS            1
 #define EI_MAX_FREQUENCIES             5
-#define EI_DEVICE_N_RESOLUTIONS        2
-#define EI_DEVICE_N_RESIZE_RESOLUTIONS 2
 
 #ifdef DEBUG
 #define DEBUG_PRINT ei_printf
 #else
 #define DEBUG_PRINT null_printf
 #endif
+
+const uint LED_PIN = PICO_DEFAULT_LED_PIN;
 
 /** C Callback types */
 typedef int (*c_callback)(uint8_t out_buffer[32], size_t *out_size);
@@ -51,41 +52,53 @@ typedef bool (*c_callback_read_sample_buffer)(
     size_t length,
     void (*data_fn)(uint8_t *, size_t));
 
-typedef struct {
-    size_t width;
-    size_t height;
-} ei_device_resize_resolutions_t;
-
 /**
  * @brief      Class description and implementation of device specific 
  * 			   characteristics
  */
 class EiDeviceRP2040 : public EiDeviceInfo {
 private:
-    ei_device_sensor_t sensors[EI_DEVICE_N_SENSORS];
+
+    static const int standalone_sensor_num = 1;
+    ei_device_sensor_t standalone_sensor_list[standalone_sensor_num];
+
+    bool camera_present;
+
+    bool network_present;
+    bool network_connected;   
+    //EiNetworkDevice *net;
+
+    EiDeviceRP2040() = delete;
+    std::string mac_address = "00:11:22:33:44:55:66";
+    EiState state;
 
 public:
-    EiDeviceRP2040(void);
 
-    int get_id(uint8_t out_buffer[32], size_t *out_size);
-    const char *get_id_pointer(void);
-    int get_type(uint8_t out_buffer[32], size_t *out_size);
+    EiDeviceRP2040(EiDeviceMemory* mem);
+    ~EiDeviceRP2040();
+
     void delay_ms(uint32_t milliseconds);
-    const char *get_type_pointer(void);
+
+    bool scan_networks(void);    
     bool get_wifi_connection_status(void);
     bool get_wifi_present_status();
-    bool get_sensor_list(const ei_device_sensor_t **sensor_list, size_t *sensor_list_size);
-    int get_data_output_baudrate(ei_device_data_output_baudrate_t *baudrate);
-    uint32_t filesys_get_block_size(void);
-    uint32_t filesys_get_n_available_sample_blocks(void);
-    bool start_sample_thread(void (*sample_read_cb)(void), float sample_interval_ms);
-    bool stop_sample_thread(void);
 
-    c_callback get_id_function(void);
-    c_callback get_type_function(void);
-    c_callback_status get_wifi_connection_status_function(void);
-    c_callback_status get_wifi_present_status_function(void);
-    c_callback_read_sample_buffer get_read_sample_buffer_function(void);
+    std::string get_mac_address(void);
+
+    void (*sample_read_callback)(void);
+    void init_device_id(void);
+    void clear_config(void);
+    bool is_camera_present(void);
+    bool start_sample_thread(void (*sample_read_cb)(void), float sample_interval_ms) override;
+    bool stop_sample_thread(void) override;
+    void set_state(EiState state) override;
+    EiState get_state(void);
+    bool get_sensor_list(const ei_device_sensor_t **sensor_list, size_t *sensor_list_size) override;
+
+    void set_default_data_output_baudrate(void) override;
+    void set_max_data_output_baudrate(void) override;
+    uint32_t get_data_output_baudrate(void) override;
+
 };
 
 /* Function prototypes ----------------------------------------------------- */
@@ -93,8 +106,5 @@ char ei_get_serial_byte(void);
 bool ei_user_invoke_stop(void);
 static bool read_sample_buffer(size_t begin, size_t length, void (*data_fn)(uint8_t *, size_t));
 void null_printf(const char *format, ...);
-
-/* Reference to object for external usage ---------------------------------- */
-extern EiDeviceRP2040 EiDevice;
 
 #endif

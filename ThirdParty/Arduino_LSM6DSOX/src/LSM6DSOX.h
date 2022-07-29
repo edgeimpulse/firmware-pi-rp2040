@@ -58,3 +58,4 @@ class LSM6DSOXClass {
 };
 
 extern LSM6DSOXClass IMU;
+extern LSM6DSOXClass IMU1;

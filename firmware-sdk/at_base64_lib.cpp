@@ -27,6 +27,7 @@
 
 /* Include ----------------------------------------------------------------- */
 #include "at_base64_lib.h"
+#include <cmath>
 
 static const char *base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                                   "abcdefghijklmnopqrstuvwxyz"
@@ -37,9 +38,7 @@ static const char *base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
  *
  * @param input
  * @param input_size
- * @param output
- * @param output_size
- * @return int number of bytes in output buffer, negative if error occured
+ * @param putc_f pointer to putc function
  */
 void base64_encode(const char *input, size_t input_size, void (*putc_f)(char))
 {

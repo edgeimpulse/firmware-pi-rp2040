@@ -26,17 +26,10 @@
 
 #include "ei_sampler.h"
 #include "ei_config_types.h"
-#include "ei_rp2040_fs_commands.h"
 #include "ei_device_raspberry_rp2040.h"
 
 #include "sensor_aq_mbedtls_hs256.h"
 
-#ifdef __MBED__
-#include "mbed.h"
-using namespace mbed;
-using namespace rtos;
-using namespace events;
-#endif
 
 /** @todo Should be called by function pointer */
 extern bool ei_inertial_sample_start(sampler_callback callback, float sample_interval_ms);
@@ -59,7 +52,7 @@ static uint32_t samples_required;
 static uint32_t current_sample;
 static uint32_t sample_buffer_size;
 static uint32_t headerOffset = 0;
-static char write_word_buf[4];
+static uint8_t write_word_buf[4];
 static int write_addr = 0;
 EI_SENSOR_AQ_STREAM stream;
 
@@ -87,15 +80,16 @@ static sensor_aq_ctx ei_mic_ctx = {
  */
 static size_t ei_write(const void *buffer, size_t size, size_t count, EI_SENSOR_AQ_STREAM *)
 {
+    EiDeviceInfo* dev = EiDeviceInfo::get_device();
+    EiDeviceMemory* mem = dev->get_memory();
     for (size_t i = 0; i < count; i++) {
         write_word_buf[write_addr & 0x3] = *((char *)buffer + i);
 
         if ((++write_addr & 0x03) == 0x00) {
-            //ei_printf("writing %08x %08x %08x %08x", write_word_buf[0],  write_word_buf[1],  write_word_buf[2],  write_word_buf[3]);
-            ei_rp2040_fs_write_samples(write_word_buf, (write_addr - 4) + headerOffset, 4);
+
+            mem->write_sample_data(write_word_buf, (write_addr - 4) + headerOffset, 4);
         }
     }
-
     return count;
 }
 
@@ -123,6 +117,9 @@ static time_t ei_time(time_t *t)
  */
 static void ei_write_last_data(void)
 {
+    EiDeviceInfo* dev = EiDeviceInfo::get_device();
+    EiDeviceMemory* mem = dev->get_memory();  
+
     uint8_t fill = ((uint8_t)write_addr & 0x03);
     uint8_t insert_end_address = 0;
 
@@ -130,8 +127,7 @@ static void ei_write_last_data(void)
         for (uint8_t i = fill; i < 4; i++) {
             write_word_buf[i] = 0xFF;
         }
-
-        ei_rp2040_fs_write_samples(write_word_buf, (write_addr & ~0x03) + headerOffset, 4);
+        mem->write_sample_data(write_word_buf, (write_addr & ~0x03) + headerOffset, 4);
         insert_end_address = 4;
     }
 
@@ -139,7 +135,7 @@ static void ei_write_last_data(void)
     for (uint8_t i = 0; i < 4; i++) {
         write_word_buf[i] = 0xFF;
     }
-    ei_rp2040_fs_write_samples(write_word_buf, (write_addr & ~0x03) + headerOffset + insert_end_address, 4);
+    mem->write_sample_data(write_word_buf, (write_addr & ~0x03) + headerOffset + insert_end_address, 4);
 }
 
 /**
@@ -152,59 +148,55 @@ static void ei_write_last_data(void)
  */
 bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_start, uint32_t sample_size)
 {
-    char filename[256];
+    EiDeviceInfo* dev = EiDeviceInfo::get_device();
+    EiDeviceMemory* mem = dev->get_memory();  
+
     sensor_aq_payload_info *payload = (sensor_aq_payload_info *)v_ptr_payload;
 
     ei_printf("Sampling settings:\n");
-    ei_printf("\tInterval: ");
-    ei_printf_float((float)ei_config_get_config()->sample_interval_ms);
-    ei_printf(" ms.\n");
-    ei_printf("\tLength: %lu ms.\n", ei_config_get_config()->sample_length_ms);
-    ei_printf("\tName: %s\n", ei_config_get_config()->sample_label);
-    ei_printf("\tHMAC Key: %s\n", ei_config_get_config()->sample_hmac_key);
+    ei_printf("\tInterval: %.5f ms.\n", dev->get_sample_interval_ms());
+    ei_printf("\tLength: %lu ms.\n", dev->get_sample_length_ms());
+    ei_printf("\tName: %s\n", dev->get_sample_label().c_str());
+    ei_printf("\tHMAC Key: %s\n", dev->get_sample_hmac_key().c_str());
+    ei_printf("\tFile name: %s\n", dev->get_sample_label().c_str());
 
-    int fn_r = snprintf(filename, 256, "/fs/%s", ei_config_get_config()->sample_label);
-    if (fn_r <= 0) {
-        ei_printf("ERR: Failed to allocate file name\n");
-        return false;
-    }
-
-    ei_printf("\tFile name: %s\n", filename);
-
-    samples_required = (uint32_t)(((float)ei_config_get_config()->sample_length_ms) / ei_config_get_config()->sample_interval_ms);
-    sample_buffer_size = (samples_required * sample_size) * 4;
+    samples_required = (uint32_t)((dev->get_sample_length_ms()) / dev->get_sample_interval_ms());
+    sample_buffer_size = (samples_required * sample_size) * 2;
     current_sample = 0;
 
     ei_printf("Samples req: %d\n", samples_required);
 
     // Minimum delay of 2000 ms for daemon
-    if (((sample_buffer_size / ei_rp2040_fs_get_block_size()) + 1) * RP2040_FS_BLOCK_ERASE_TIME_MS < 2000) {
-        ei_printf("Starting in %lu ms... (or until all flash was erased)\n", 2000);
-        EiDevice.delay_ms(2000);
+    if (((sample_buffer_size / mem->block_size) + 1) * mem->block_erase_time < 2000) {
+        ei_printf("Starting in %d ms... (or until all flash was erased)\n", 2000);
+        ei_sleep(2000);
+        DEBUG_PRINT("Done waiting\n");
     } 
     else {
-        ei_printf("Starting in %lu ms... (or until all flash was erased)\n",
-                    ((sample_buffer_size / ei_rp2040_fs_get_block_size()) + 1) * RP2040_FS_BLOCK_ERASE_TIME_MS);
+        ei_printf("Starting in %d ms... (or until all flash was erased)\n",
+                    ((sample_buffer_size / mem->block_size) + 1) * mem->block_erase_time);
     }
 
-    DEBUG_PRINT("Done waiting\n");
-    if (ei_rp2040_fs_erase_sampledata(0, sample_buffer_size + ei_rp2040_fs_get_block_size()) != RP2040_FS_CMD_OK) {
+    dev->set_state(eiStateErasingFlash);
+    if(mem->erase_sample_data(0, sample_buffer_size) != (sample_buffer_size)) {
         return false;
     }
-
     DEBUG_PRINT("Done erasing\n");
+
     if (create_header(payload) == false) {
         return false;
     }
     DEBUG_PRINT("Done header\n");
 
-	ei_printf("Sampling...\n");
-    if(ei_sample_start(&sample_data_callback, ei_config_get_config()->sample_interval_ms) == false)
+    if(ei_sample_start(&sample_data_callback, dev->get_sample_interval_ms()) == false) {
         return false;
+    }
+    
+	ei_printf("Sampling...\n");
 
-    //while(current_sample < samples_required) {
-    //    ThisThread::sleep_for(10);
-    //};
+    while(current_sample < samples_required) {
+        dev->set_state(eiStateSampling);
+    };
 
     ei_write_last_data();
     write_addr++;   
@@ -216,24 +208,24 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
     }
 
     // finish the signing
+    DEBUG_PRINT("Finish the signing \n");
     ctx_err = ei_mic_ctx.signature_ctx->finish(ei_mic_ctx.signature_ctx, ei_mic_ctx.hash_buffer.buffer);
 
     // load the first page in flash...
-    uint8_t *page_buffer = (uint8_t *)malloc(ei_rp2040_fs_get_block_size());
+    uint8_t *page_buffer = (uint8_t *)ei_malloc(mem->block_size);
     if (!page_buffer) {
         ei_printf("Failed to allocate a page buffer to write the hash\n");
         return false;
     }
-    
-    ei_rp2040_flush_buf(0);
-    EiDevice.delay_ms(100);
 
-    DEBUG_PRINT("Reading first page \n");
-    int j = ei_rp2040_fs_read_sample_data(page_buffer, 0, ei_rp2040_fs_get_block_size());
+    mem->flush_data();
+    ei_sleep(100);
 
-    if (j != 0) {
+    //DEBUG_PRINT("Reading first page \n");
+    uint32_t j = mem->read_sample_data(page_buffer, 0, mem->block_size);
+    if (j != mem->block_size) {
         ei_printf("Failed to read first page (%d)\n", j);
-        free(page_buffer);
+        ei_free(page_buffer);
         return false;
     }
 
@@ -257,28 +249,26 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
         page_buffer[ei_mic_ctx.signature_index + (hash_ix * 2) + 1] = second_c;
     }
 
-    j = ei_rp2040_fs_erase_sampledata(0, ei_rp2040_fs_get_block_size());
-    if (j != 0) {
+    j = mem->erase_sample_data(0, mem->block_size);
+    if (j != mem->block_size) {
         ei_printf("Failed to erase first page (%d)\n", j);
-        free(page_buffer);
+        ei_free(page_buffer);
         return false;
     }
 
-    EiDevice.delay_ms(100);
+    j = mem->write_sample_data(page_buffer, 0, mem->block_size);
 
-    j = ei_rp2040_fs_write_samples(page_buffer, 0, ei_rp2040_fs_get_block_size());
+    ei_free(page_buffer);
 
-    free(page_buffer);
-
-    if (j != 0) {
+    if (j != mem->block_size) {
         ei_printf("Failed to write first page with updated hash (%d)\n", j);
         return false;
     }
 
-    ei_rp2040_flush_buf(0);
-    EiDevice.delay_ms(100);
+    mem->flush_data();
+    ei_sleep(100);
 
-    finish_and_upload((char *)"fd/imu", ei_config_get_config()->sample_length_ms);
+    finish_and_upload((char*)dev->get_sample_label().c_str(), dev->get_sample_length_ms());
 
     return true;
 }
@@ -292,7 +282,9 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
  */
 static bool create_header(sensor_aq_payload_info *payload)
 {
-    sensor_aq_init_mbedtls_hs256_context(&ei_mic_signing_ctx, &ei_mic_hs_ctx, ei_config_get_config()->sample_hmac_key);
+    EiDeviceInfo* dev = EiDeviceInfo::get_device();
+    EiDeviceMemory* mem = dev->get_memory();   
+    sensor_aq_init_mbedtls_hs256_context(&ei_mic_signing_ctx, &ei_mic_hs_ctx, dev->get_sample_hmac_key().c_str());
 
     int tr = sensor_aq_init(&ei_mic_ctx, payload, NULL, true);
 
@@ -316,9 +308,10 @@ static bool create_header(sensor_aq_payload_info *payload)
     }
 
     // Write to blockdevice
-    tr = ei_rp2040_fs_write_samples(ei_mic_ctx.cbor_buffer.ptr, 0, end_of_header_ix);
-    ei_printf("Try to write %d bytes\r\n", end_of_header_ix);
-    if (tr != 0) {
+    tr = mem->write_sample_data((uint8_t*)ei_mic_ctx.cbor_buffer.ptr, 0, end_of_header_ix);
+    DEBUG_PRINT("Try to write %d bytes\r\n", end_of_header_ix);
+
+    if (tr != end_of_header_ix) {
         ei_printf("Failed to write to header blockdevice (%d)\n", tr);
         return false;
     }

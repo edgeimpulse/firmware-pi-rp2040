@@ -39,7 +39,11 @@ public:
      * @returns The mel scale values(or a single mel).
      */
     static float frequency_to_mel(float f) {
-        return 1127.0 * numpy::log(1 + f / 700.0f);
+#if EI_PORTING_RENESASRA65 == 1
+        return 1127.0 * log(1.0 + f / 700.0f);
+#else
+        return 1127.0 * numpy::log((1.0 + f / 700.0f));
+#endif
     }
 
     /**
