@@ -284,7 +284,7 @@ public:
                 EIDSP_ERR(ret);
             }
 
-            ret = processing::power_spectrum(
+            ret = numpy::power_spectrum(
                 signal_frame.buffer,
                 stack_frame_info.frame_length,
                 power_spectrum_frame.buffer,
@@ -317,7 +317,7 @@ public:
             }
         }
 
-        functions::zero_handling(out_features);
+        numpy::zero_handling(out_features);
 
         return EIDSP_OK;
     }
@@ -412,7 +412,7 @@ public:
                 }
             }
 
-            ret = processing::power_spectrum(
+            ret = numpy::power_spectrum(
                 signal_frame.buffer,
                 stack_frame_info.frame_length,
                 out_features->buffer + (ix * coefficients),
@@ -425,7 +425,7 @@ public:
             }
         }
 
-        functions::zero_handling(out_features);
+        numpy::zero_handling(out_features);
 
         return EIDSP_OK;
     }

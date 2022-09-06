@@ -22,8 +22,8 @@ add_definitions(-DEIDSP_USE_CMSIS_DSP=1
                 -DEIDSP_LOAD_CMSIS_DSP_SOURCES=1
                 -DEI_CLASSIFIER_TFLITE_ENABLE_CMSIS_NN=1
                 -DEIDSP_QUANTIZE_FILTERBANK=0
+                -DFREERTOS_ENABLED=1
                 -DARM_MATH_LOOPUNROLL
-                -DEI_SENSOR_AQ_STREAM=FILE
                 )
 
 OPTION(DEFINE_DEBUG

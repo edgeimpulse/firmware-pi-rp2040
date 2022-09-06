@@ -272,8 +272,12 @@ bool ei_microphone_inference_start(uint32_t n_samples, float interval_ms)
         return false;
     }
 
-    uint32_t sample_buffer_size = (n_samples / 100) * sizeof(int16_t);
-    sampleBuffer = (int16_t *)ei_malloc(sample_buffer_size);
+    // theoretically we needed to do this
+    // however it causes issues
+    // TO-DO: investigate what sound is actually like during the inference
+    //sampleBuffer = (int16_t *)ei_malloc((n_samples / 100) * sizeof(int16_t));
+
+    sampleBuffer = (int16_t *)ei_malloc(512 * sizeof(int16_t));
 
     if(sampleBuffer == NULL) {
         ei_free(inference.buffers[0]);

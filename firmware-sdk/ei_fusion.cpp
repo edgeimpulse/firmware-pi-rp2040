@@ -309,7 +309,8 @@ void ei_built_sensor_fusion_list(void)
         ei_printf("Max sample length: %us, ", it->max_sample_length);
         ei_printf("Frequencies: [");
         for (auto freq = it->frequencies.begin(); freq != it->frequencies.end();) {
-            ei_printf("%.2fHz", *freq);
+            ei_printf_float(*freq);
+            ei_printf("Hz");
             freq++;
             if (freq != it->frequencies.end()) {
                 ei_printf(", ");

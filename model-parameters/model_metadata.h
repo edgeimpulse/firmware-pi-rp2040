@@ -172,6 +172,8 @@ typedef struct {
     int spectral_peaks_count;
     float spectral_peaks_threshold;
     const char * spectral_power_edges;
+    bool do_log;
+    bool do_fft_overlap;
 } ei_dsp_config_spectral_analysis_t;
 
 typedef struct {

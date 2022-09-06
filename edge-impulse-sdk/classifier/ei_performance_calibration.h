@@ -145,8 +145,14 @@ public:
             scores[i].value = this->_running_sum[i] / this->_n_scores_in_array;
 
             if (scores[i].value > current_top_score) {
-                current_top_score = scores[i].value;
-                current_top_index = i;
+                if(this->_suppression_flags == 0) {
+                    current_top_score = scores[i].value;
+                    current_top_index = i;
+                }
+                else if(this->_suppression_flags & (1 << i)) {
+                    current_top_score = scores[i].value;
+                    current_top_index = i;
+                }
             }
         }
 

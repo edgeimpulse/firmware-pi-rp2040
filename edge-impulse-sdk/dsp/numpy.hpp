@@ -35,10 +35,13 @@
 #include <string.h>
 #include <stddef.h>
 #include <cfloat>
+#include <vector>
+#include <algorithm>
 #include "numpy_types.h"
 #include "config.hpp"
 #include "returntypes.hpp"
 #include "memory.hpp"
+#include "ei_utils.h"
 #include "dct/fast-dct-fft.h"
 #include "kissfft/kiss_fftr.h"
 #if __has_include("model-parameters/model_metadata.h")
@@ -48,6 +51,9 @@
 #include "edge-impulse-sdk/CMSIS/DSP/Include/arm_math.h"
 #include "edge-impulse-sdk/CMSIS/DSP/Include/arm_const_structs.h"
 #endif
+
+// For the following CMSIS includes, we want to use the C fallback, so include whether or not we set the CMSIS flag
+#include "edge-impulse-sdk/CMSIS/DSP/Include/dsp/statistics_functions.h"
 
 #ifdef __MBED__
 #include "mbed.h"
@@ -67,6 +73,17 @@ static constexpr float quantized_values_one_zero[] = { (0.0f / 1.0f), (1.0f / 10
 
 class numpy {
 public:
+    
+    static float sqrt(float x) {
+#if EIDSP_USE_CMSIS_DSP
+        float temp;
+        arm_sqrt_f32(x, &temp);
+        return temp;
+#else
+        return sqrtf(x);
+#endif
+    }    
+
     /**
      * Roll array elements along a given axis.
      * Elements that roll beyond the last position are re-introduced at the first.
@@ -319,12 +336,52 @@ public:
         return EIDSP_OK;
     }
 
+    static void transpose_in_place(matrix_t *matrix) {
+        size_t size = matrix->cols * matrix->rows - 1;
+        float temp; // temp for swap
+        size_t next; // next item to swap
+        size_t cycleBegin; // index of start of cycle
+        size_t i; // location in matrix 
+        size_t all_done_mark = 1; 
+        std::vector<bool> done(size+1,false);
+
+        i = 1; // Note that matrix[0] and last element of matrix won't move
+        while (1)
+        {
+            cycleBegin = i;
+            temp = matrix->buffer[i];
+            do
+            {
+                size_t col = i % matrix->cols;
+                size_t row = i / matrix->cols;
+                // swap row and col to make new idx, b/c we want to know where in the transposed matrix
+                next = col*matrix->rows + row;
+                float temp2 = matrix->buffer[next];
+                matrix->buffer[next] = temp;
+                temp = temp2;
+                done[next] = true; 
+                i = next;
+            }
+            while (i != cycleBegin);
+    
+            // start next cycle by find next not done
+            for (i = all_done_mark; done[i]; i++) {
+                all_done_mark++; // move the high water mark so we don't look again
+                if(i>=size) { goto LOOP_END; }
+            }
+        }
+        LOOP_END:
+        // finally, swap the row and column dimensions
+        std::swap(matrix->rows, matrix->cols);
+    }
+
     /**
-     * Transpose an array in place (from MxN to NxM)
+     * Transpose an array, souce is destination (from MxN to NxM)
      * Note: this temporary allocates a copy of the matrix on the heap.
      * @param matrix
      * @param rows
      * @param columns
+     * @deprecated You probably want to use transpose_in_place
      * @returns EIDSP_OK if OK
      */
     static int transpose(matrix_t *matrix) {
@@ -343,10 +400,11 @@ public:
     }
 
     /**
-     * Transpose an array in place (from MxN to NxM)
+     * Transpose an array, source is destination (from MxN to NxM)
      * @param matrix
      * @param rows
      * @param columns
+     * @deprecated You probably want to use transpose_in_place
      * @returns EIDSP_OK if OK
      */
     static int transpose(float *matrix, int rows, int columns) {
@@ -628,36 +686,6 @@ public:
 #else
         for (size_t ix = 0; ix < matrix->rows * matrix->cols; ix++) {
             matrix->buffer[ix] *= scale;
-        }
-#endif
-        return EIDSP_OK;
-    }
-
-    /**
-     * Scale a q31 matrix in place, per row
-     * @todo Now works for scale values between 0 and 1. Should also work for bigger values.
-     * @param matrix Input matrix (MxN)
-     * @param scale_matrix Scale matrix (Mx1)
-     * @returns 0 if OK
-     */
-    static int scale(matrix_i32_t *matrix, float scale) {
-        if (scale == 1.0f) return EIDSP_OK;
-        else if(scale > 1.0f) return EIDSP_PARAMETER_INVALID;
-
-        EIDSP_i32 scale_i32;
-        float_to_int32(&scale, &scale_i32, 1);
-
-#if EIDSP_USE_CMSIS_DSP
-        const arm_matrix_instance_q31 mi = { (uint16_t)matrix->rows, (uint16_t)matrix->cols, matrix->buffer };
-        arm_matrix_instance_q31 mo = { (uint16_t)matrix->rows, (uint16_t)matrix->cols, matrix->buffer };
-        int status = arm_mat_scale_q31(&mi, scale_i32, 0, &mo);
-        if (status != ARM_MATH_SUCCESS) {
-            return status;
-        }
-#else
-        for (size_t ix = 0; ix < matrix->rows * matrix->cols; ix++) {
-            int64_t prod = (int64_t)matrix->buffer[ix] * scale_i32;
-            matrix->buffer[ix] = saturate((EIDSP_i32)(prod >> 31), 32);
         }
 #endif
         return EIDSP_OK;
@@ -1735,7 +1763,6 @@ public:
         return EIDSP_OK;
     }
 
-private:
     static int software_rfft(float *fft_input, float *output, size_t n_fft, size_t n_fft_out_features) {
         kiss_fft_cpx *fft_output = (kiss_fft_cpx*)ei_dsp_malloc(n_fft_out_features * sizeof(kiss_fft_cpx));
         if (!fft_output) {
@@ -2280,6 +2307,136 @@ private:
 #endif
     }
 #endif // #if EIDSP_USE_CMSIS_DSP
+
+    /**
+     * Power spectrum of a frame
+     * @param frame Row of a frame
+     * @param frame_size Size of the frame
+     * @param out_buffer Out buffer, size should be fft_points
+     * @param out_buffer_size Buffer size
+     * @param fft_points (int): The length of FFT. If fft_length is greater than frame_len, the frames will be zero-padded.
+     * @returns EIDSP_OK if OK
+     */
+    static int power_spectrum(
+        float *frame,
+        size_t frame_size,
+        float *out_buffer,
+        size_t out_buffer_size,
+        uint16_t fft_points)
+    {
+        if (out_buffer_size != static_cast<size_t>(fft_points / 2 + 1)) {
+            EIDSP_ERR(EIDSP_MATRIX_SIZE_MISMATCH);
+        }
+
+        int r = numpy::rfft(frame, frame_size, out_buffer, out_buffer_size, fft_points);
+        if (r != EIDSP_OK) {
+            return r;
+        }
+
+        for (size_t ix = 0; ix < out_buffer_size; ix++) {
+            out_buffer[ix] = (1.0 / static_cast<float>(fft_points)) *
+                (out_buffer[ix] * out_buffer[ix]);
+        }
+
+        return EIDSP_OK;
+    }
+
+    static int welch_max_hold(
+        float *input,
+        size_t input_size,
+        float *output,
+        size_t start_bin,
+        size_t stop_bin,
+        size_t fft_points,
+        bool do_overlap)
+    {
+        // save off one point to put back, b/c we're going to calculate in place
+        float saved_point;
+        bool do_saved_point = false;
+        size_t fft_out_size = fft_points / 2 + 1;
+        float *fft_out;
+        ei_unique_ptr_t p_fft_out(nullptr, ei_free);
+        if (input_size < fft_points) {
+            fft_out = (float *)ei_calloc(fft_out_size, sizeof(float));
+            p_fft_out.reset(fft_out);
+        }
+        else {
+            // set input as output for in place operation
+            fft_out = input;
+            // save off one point to put back, b/c we're going to calculate in place
+            saved_point = input[fft_points / 2];
+            do_saved_point = true;
+        }
+
+        // init the output to zeros
+        memset(output, 0, sizeof(float) * (stop_bin - start_bin));
+        int input_ix = 0;
+        while (input_ix < input_size) {
+            // Figure out if we need any zero padding
+            size_t n_input_points = input_ix + fft_points <= input_size ? fft_points
+                                                                        : input_size - input_ix;
+            EI_TRY(power_spectrum(
+                input + input_ix,
+                n_input_points,
+                fft_out,
+                fft_points / 2 + 1,
+                fft_points));
+            int j = 0;
+            // keep the max of the last frame and everything before
+            for (size_t i = start_bin; i < stop_bin; i++) {
+                output[j] = std::max(output[j], fft_out[i]);
+                j++;
+            }
+            if (do_overlap) {
+                if (do_saved_point) {
+                    // This step only matters first time through
+                    input[fft_points / 2] = saved_point;
+                    do_saved_point = false;
+                }
+                input_ix += fft_points / 2;
+            }
+            else {
+                input_ix += fft_points;
+            }
+        }
+
+        return EIDSP_OK;
+    }
+
+    static float variance(float *input, size_t size)
+    {
+        // Use CMSIS either way.  Will fall back to straight C when needed
+        float temp;
+        arm_var_f32(input, size, &temp);
+        return temp;
+    }
+
+    /**
+     * This function handle the issue with zero values if the are exposed
+     * to become an argument for any log function.
+     * @param input Array
+     * @param input_size Size of array
+     * @returns void
+     */
+    static void zero_handling(float *input, size_t input_size)
+    {
+        for (size_t ix = 0; ix < input_size; ix++) {
+            if (input[ix] == 0) {
+                input[ix] = 1e-10;
+            }
+        }
+    }
+
+    /**
+     * This function handle the issue with zero values if the are exposed
+     * to become an argument for any log function.
+     * @param input Matrix
+     * @returns void
+     */
+    static void zero_handling(matrix_t *input)
+    {
+        zero_handling(input->buffer, input->rows * input->cols);
+    }
 };
 
 } // namespace ei

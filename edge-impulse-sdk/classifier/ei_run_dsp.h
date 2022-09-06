@@ -51,108 +51,39 @@ static float *ei_dsp_cont_current_frame = nullptr;
 static size_t ei_dsp_cont_current_frame_size = 0;
 static int ei_dsp_cont_current_frame_ix = 0;
 
-__attribute__((unused)) int extract_spectral_analysis_features(signal_t *signal, matrix_t *output_matrix, void *config_ptr, const float frequency) {
-    ei_dsp_config_spectral_analysis_t config = *((ei_dsp_config_spectral_analysis_t*)config_ptr);
-
-    int ret;
-
-    const float sampling_freq = frequency;
+__attribute__((unused)) int extract_spectral_analysis_features(
+    signal_t *signal,
+    matrix_t *output_matrix,
+    void *config_ptr,
+    const float frequency)
+{
+    ei_dsp_config_spectral_analysis_t *config = (ei_dsp_config_spectral_analysis_t *)config_ptr;
 
     // input matrix from the raw signal
-    matrix_t input_matrix(signal->total_length / config.axes, config.axes);
+    matrix_t input_matrix(signal->total_length / config->axes, config->axes);
     if (!input_matrix.buffer) {
         EIDSP_ERR(EIDSP_OUT_OF_MEM);
     }
 
     signal->get_data(0, signal->total_length, input_matrix.buffer);
 
-    // scale the signal
-    ret = numpy::scale(&input_matrix, config.scale_axes);
-    if (ret != EIDSP_OK) {
-        ei_printf("ERR: Failed to scale signal (%d)\n", ret);
-        EIDSP_ERR(ret);
+    if (config->implementation_version == 1) {
+        return spectral::feature::extract_spectral_analysis_features_v1(
+            &input_matrix,
+            output_matrix,
+            config,
+            frequency);
+    }
+    if (config->implementation_version == 2) {
+        return spectral::feature::extract_spectral_analysis_features_v2(
+            &input_matrix,
+            output_matrix,
+            config,
+            frequency);
     }
 
-    // transpose the matrix so we have one row per axis (nifty!)
-    ret = numpy::transpose(&input_matrix);
-    if (ret != EIDSP_OK) {
-        ei_printf("ERR: Failed to transpose matrix (%d)\n", ret);
-        EIDSP_ERR(ret);
-    }
-
-    // the spectral edges that we want to calculate
-    matrix_t edges_matrix_in(64, 1);
-    size_t edge_matrix_ix = 0;
-
-    char spectral_str[128] = { 0 };
-    if (strlen(config.spectral_power_edges) > sizeof(spectral_str) - 1) {
-        EIDSP_ERR(EIDSP_PARAMETER_INVALID);
-    }
-    memcpy(spectral_str, config.spectral_power_edges, strlen(config.spectral_power_edges));
-
-    // convert spectral_power_edges (string) into float array
-    char *spectral_ptr = spectral_str;
-    while (spectral_ptr != NULL) {
-        while((*spectral_ptr) == ' ') {
-            spectral_ptr++;
-        }
-
-        edges_matrix_in.buffer[edge_matrix_ix++] = atof(spectral_ptr);
-
-        // find next (spectral) delimiter (or '\0' character)
-        while((*spectral_ptr != ',')) {
-            spectral_ptr++;
-            if (*spectral_ptr == '\0') break;
-        }
-
-        if (*spectral_ptr == '\0') {
-            spectral_ptr = NULL;
-        }
-        else  {
-            spectral_ptr++;
-        }
-    }
-    edges_matrix_in.rows = edge_matrix_ix;
-
-    // calculate how much room we need for the output matrix
-    size_t output_matrix_cols = spectral::feature::calculate_spectral_buffer_size(
-        true, config.spectral_peaks_count, edges_matrix_in.rows
-    );
-    // ei_printf("output_matrix_size %hux%zu\n", input_matrix.rows, output_matrix_cols);
-    if (output_matrix->cols * output_matrix->rows != static_cast<uint32_t>(output_matrix_cols * config.axes)) {
-        EIDSP_ERR(EIDSP_MATRIX_SIZE_MISMATCH);
-    }
-
-    output_matrix->cols = output_matrix_cols;
-    output_matrix->rows = config.axes;
-
-    spectral::filter_t filter_type;
-    if (strcmp(config.filter_type, "low") == 0) {
-        filter_type = spectral::filter_lowpass;
-    }
-    else if (strcmp(config.filter_type, "high") == 0) {
-        filter_type = spectral::filter_highpass;
-    }
-    else {
-        filter_type = spectral::filter_none;
-    }
-
-    ret = spectral::feature::spectral_analysis(output_matrix, &input_matrix,
-        sampling_freq, filter_type, config.filter_cutoff, config.filter_order,
-        config.fft_length, config.spectral_peaks_count, config.spectral_peaks_threshold, &edges_matrix_in);
-    if (ret != EIDSP_OK) {
-        ei_printf("ERR: Failed to calculate spectral features (%d)\n", ret);
-        EIDSP_ERR(ret);
-    }
-
-    // flatten again
-    output_matrix->cols = config.axes * output_matrix_cols;
-    output_matrix->rows = 1;
-
-    return EIDSP_OK;
+    return EIDSP_NOT_SUPPORTED;
 }
-
-
 
 __attribute__((unused)) int extract_raw_features(signal_t *signal, matrix_t *output_matrix, void *config_ptr, const float frequency) {
     ei_dsp_config_raw_t config = *((ei_dsp_config_raw_t*)config_ptr);

@@ -177,7 +177,16 @@ public:
         return erase_data(offset + address, num_bytes);
     }
 
-    virtual uint32_t flush_data(void) = 0;
+
+    /**
+     * @brief Necessary for targets, such as RP2040, which have large Flash page size (256 bytes)
+     * For the targets, that don't require it, a default dummy implementation is provided
+     * to reduce boilerplate code in target flash implementation file.
+     */
+    virtual uint32_t flush_data(void)
+    {
+        return 0;
+    }
 };
 
 template <int BLOCK_SIZE = 512, int MEMORY_BLOCKS = 8> class EiDeviceRAM : public EiDeviceMemory {
@@ -246,11 +255,6 @@ public:
     uint32_t erase_sample_data(uint32_t address, uint32_t num_bytes) override
     {
         return this->erase_data(config_size + address, num_bytes);
-    }
-
-    uint32_t flush_data(void) override
-    {
-        return 0;
     }
 };
 
