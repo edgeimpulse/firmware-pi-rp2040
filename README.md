@@ -65,6 +65,8 @@ make -j4
 ## Building for different boards
 If you need to build firmware for other boards, follow the instructions for building different boards at github.com/raspberrypi/pico-sdk
 
+## Flashing firmware
+
 The  fastest  method  to  load  firmware  onto  a  RP2040-based  board  for  the  first  time  is  by  mounting  it  as  a  USB  Mass
 Storage  Device.  Doing  this  allows  you  to  drag  a  file  onto  the  board  to  program  the  flash.  Go  ahead  and  connect  the
 Raspberry  Pi  Pico  to  your  computer  using  a  micro-USB  cable,  making  sure  that  you  hold  down  the  BOOTSEL  button as you do so, to force it into USB Mass Storage Mode. Drag the ei_rp2040_firmware.uf2 file from build folder to newly appeared USB Mass Storage device.
