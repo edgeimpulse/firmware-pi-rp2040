@@ -46,6 +46,9 @@ void (*sample_cb_ptr)(void);
 
 /* Private function declarations ------------------------------------------- */
 void vTimerCallback(TimerHandle_t xTimer);
+#if MULTI_FREQ_ENABLED == 1
+void vTimerMultiFreqCallback(TimerHandle_t xTimer);
+#endif
 
 /* Public functions -------------------------------------------------------- */
 
@@ -232,18 +235,79 @@ void EiDeviceRP2040::set_max_data_output_baudrate(void)
  */
 bool EiDeviceRP2040::start_sample_thread(void (*sample_read_cb)(void), float sample_interval_ms)
 {
+#if MULTI_FREQ_ENABLED == 1
+    this->is_sampling = true;
+    this->fusioning = 1;
+#endif
+
     sample_cb_ptr = sample_read_cb;   
     fusion_timer = xTimerCreate(
                         "Fusion sampler",
-                        (uint32_t)sample_interval_ms / portTICK_PERIOD_MS,
+                        pdMS_TO_TICKS(sample_interval_ms),
                         pdTRUE,
                         (void *)0,
                         vTimerCallback
                     );
-    xTimerStart(fusion_timer, 0);
+
+    if (xTimerStart(fusion_timer, 0) == pdFAIL){
+        ei_printf("Unable to create timer\n");
+        return false;
+    }
 
     return true;
 }
+
+#if MULTI_FREQ_ENABLED == 1
+/**
+ * @brief 
+ * 
+ * @param sample_multi_read_cb 
+ * @param multi_sample_interval_ms 
+ * @param num_fusioned 
+ * @return true 
+ * @return false 
+ */
+bool EiDeviceRP2040::start_multi_sample_thread(void (*sample_multi_read_cb)(uint8_t), float* multi_sample_interval_ms, uint8_t num_fusioned)
+{
+    uint8_t i;
+    uint8_t flag = 0;
+
+    this->is_sampling = true;
+    this->sample_multi_read_callback = sample_multi_read_cb;
+    this->fusioning = num_fusioned;
+    this->multi_sample_interval.clear();
+
+    for (i = 0; i < num_fusioned; i++){
+        this->multi_sample_interval.push_back(1.f/multi_sample_interval_ms[i]*1000.f);
+    }
+
+    /* to improve, we consider just a 2 sensors case for now */
+    this->sample_interval = ei_fusion_calc_multi_gcd(this->multi_sample_interval.data(), this->fusioning);
+
+    /* force first reading */
+    for (i = 0; i < this->fusioning; i++){
+            flag |= (1<<i);
+    }
+    this->sample_multi_read_callback(flag);
+
+    this->actual_timer = 0;
+
+    fusion_timer = xTimerCreate(
+                    "Fusion sampler",
+                    pdMS_TO_TICKS(this->sample_interval),
+                    pdTRUE,
+                    (void *)0,
+                    vTimerMultiFreqCallback
+                );
+    
+    if (xTimerStart(fusion_timer, 0) == pdFAIL){
+        ei_printf("Unable to create timer\n");
+        return false;
+    }
+
+    return true;
+}
+#endif
 
 /**
  * @brief Stop timer of thread
@@ -251,6 +315,10 @@ bool EiDeviceRP2040::start_sample_thread(void (*sample_read_cb)(void), float sam
  */
 bool EiDeviceRP2040::stop_sample_thread(void)
 {
+    ei_printf("STOP\n");
+#if MULTI_FREQ_ENABLED == 1
+    this->is_sampling = false;
+#endif
     xTimerStop(fusion_timer, 0);
     //if (xTimerStop(fusion_timer, 0) != pdPASS)
     //{
@@ -293,17 +361,6 @@ char ei_get_serial_byte(void)
     return ch;
 }
 
-/**
- * @brief      Write character to serial
- *
- * @param      cChar     Char addr to write
- */
-void ei_putc(char cChar)
-{
-    putchar(cChar);
-}
-
-
 char ei_getchar()
 {
 	char ch = getchar();
@@ -327,6 +384,28 @@ void vTimerCallback(TimerHandle_t xTimer)
 {
     sample_cb_ptr();
 }
+#if MULTI_FREQ_ENABLED == 1
+void vTimerMultiFreqCallback(TimerHandle_t xTimer)
+{
+    EiDeviceRP2040* dev = static_cast<EiDeviceRP2040*>(EiDeviceRP2040::get_device());
+    uint8_t flag = 0;
+    uint8_t i = 0;
+    
+    if (dev->get_is_sampling() == true){
+        dev->actual_timer += dev->get_sample_interval();  /* update actual time */
+
+        for (i = 0; i < dev->get_fusioning(); i++){
+            if (((uint32_t)(dev->actual_timer % (uint32_t)dev->multi_sample_interval.at(i))) == 0) {   /* check if period of sensor is a multiple of actual time*/
+                flag |= (1<<i);                                                                     /* if so, time to sample it! */
+            }
+        }
+
+        if (dev->sample_multi_read_callback != nullptr){
+            dev->sample_multi_read_callback(flag);        
+        }    
+    }
+}
+#endif
 
 /**
  * @brief      null_printf, all DEBUG_PRINT set to it when not 

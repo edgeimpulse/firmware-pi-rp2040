@@ -24,6 +24,8 @@
 #include "ei_at_handlers.h"
 #include "ei_device_raspberry_rp2040.h"
 #include "ei_device_lib.h"
+#include "ei_device_interface.h"
+#include "at_base64_lib.h"
 
 #include "edge-impulse-sdk/porting/ei_classifier_porting.h"
 
@@ -42,6 +44,8 @@ using namespace std;
 
 EiDeviceRP2040* dev = static_cast<EiDeviceRP2040*>(EiDeviceRP2040::get_device());
 EiDeviceMemory* mem = dev->get_memory();
+
+#define TRANSFER_BUF_LEN 128
 
 // Helper functions
 
@@ -273,7 +277,7 @@ bool at_read_raw(const char **argv, const int argc)
                 ei_printf("\n");
             else
                 ei_printf(" ");
-        }  
+        }
     }
     ei_printf("\n");
 
@@ -320,6 +324,21 @@ bool at_run_impulse(void)
     return true;
 }
 
+bool at_run_impulse_static_data(const char **argv, const int argc)
+{
+
+    if (check_args_num(2, argc) == false) {
+        return false;
+    }
+
+    bool debug = (argv[0][0] == 'y');
+    size_t length = (size_t)atoi(argv[1]);
+
+    bool res = run_impulse_static_data(debug, length, TRANSFER_BUF_LEN);
+
+    return res;
+}
+
 bool at_run_impulse_debug(const char **argv, const int argc)
 {
     bool use_max_uart_speed = false;
@@ -349,7 +368,7 @@ bool at_stop_impulse(void)
 bool at_get_config(void)
 {
     dev->load_config();
-    
+
     const ei_device_sensor_t *sensor_list;
     size_t sensor_list_size;
 
@@ -384,10 +403,12 @@ bool at_get_config(void)
     ei_printf("\n");
     ei_printf("===== Inference ======\n");
     ei_printf("Sensor:           %d\r\n", EI_CLASSIFIER_SENSOR);
-#if EI_CLASSIFIER_OBJECT_DETECTION_CONSTRAINED == 1
-    const char *model_type = "constrained_object_detection";
-#elif EI_CLASSIFIER_OBJECT_DETECTION
-    const char *model_type = "object_detection";
+#if EI_CLASSIFIER_OBJECT_DETECTION
+    #if EI_CLASSIFIER_OBJECT_DETECTION_LAST_LAYER == EI_CLASSIFIER_LAST_LAYER_FOMO
+        const char *model_type = "constrained_object_detection";
+    #else
+        const char *model_type = "object_detection";
+    #endif
 #else
     const char *model_type = "classification";
 #endif
@@ -513,6 +534,13 @@ ATServer *ei_at_init(EiDeviceRP2040 *device)
         nullptr,
         nullptr,
         nullptr);
+    at->register_command(
+        AT_RUNIMPULSESTATIC,
+        AT_RUNIMPULSESTATIC_HELP_TEXT,
+        nullptr,
+        nullptr,
+        at_run_impulse_static_data,
+        AT_RUNIMPULSESTATIC_ARGS);
     at->register_command(
         AT_READRAW,
         AT_READRAW_HELP_TEXT,

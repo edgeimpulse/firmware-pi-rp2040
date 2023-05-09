@@ -23,6 +23,8 @@
 #ifndef EI_FUSION_SENSORS_CONFIG_H
 #define EI_FUSION_SENSORS_CONFIG_H
 
+#define MULTI_FREQ_ENABLED       0
+
 #define NUM_MAX_FUSIONS          2  // max number of sensor module combinations
 #define FUSION_FREQUENCY         12.5f // sampling frequency for fusion samples
 

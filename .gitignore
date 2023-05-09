@@ -36,3 +36,5 @@ build/
 
 # MacOS files
 .DS_Store
+
+copy-sdk.sh

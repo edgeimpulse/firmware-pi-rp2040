@@ -71,6 +71,10 @@ private:
     EiDeviceRP2040() = delete;
     std::string mac_address = "00:11:22:33:44:55:66";
     EiState state;
+    
+#if MULTI_FREQ_ENABLED == 1
+    bool is_sampling;
+#endif
 
 public:
 
@@ -98,6 +102,14 @@ public:
     void set_default_data_output_baudrate(void) override;
     void set_max_data_output_baudrate(void) override;
     uint32_t get_data_output_baudrate(void) override;
+
+#if MULTI_FREQ_ENABLED == 1
+	bool start_multi_sample_thread(void (*sample_multi_read_cb)(uint8_t), float* multi_sample_interval_ms, uint8_t num_fusioned) override;
+    bool get_is_sampling(void)
+    {
+        return is_sampling;
+    }
+#endif
 
 };
 

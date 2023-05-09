@@ -112,7 +112,7 @@ static void audio_inference_callback(uint32_t n_bytes)
 void on_pdm_samples_ready()
 {
     // callback from library when all the samples in the library
-    // internal sample buffer are ready for reading 
+    // internal sample buffer are ready for reading
     samples_read = PDM.available();
 
     PDM.read(sampleBuffer, samples_read);
@@ -132,7 +132,7 @@ void on_pdm_samples_ready()
 
 // AT+SAMPLESTART=Built-in microphone
 static void finish_and_upload(const char *filename, uint32_t sample_length_ms) {
-    
+
     ei_printf("Done sampling, total bytes collected: %u\n", current_sample);
 
     ei_printf("[1/1] Uploading file to Edge Impulse...\n");
@@ -202,7 +202,7 @@ static bool create_header(void)
     int ref_size = insert_ref(((char*)ei_mic_ctx.cbor_buffer.ptr + end_of_header_ix), end_of_header_ix);
 
     // and update the signature
-    tr = ei_mic_ctx.signature_ctx->update(ei_mic_ctx.signature_ctx, (uint8_t*)(ei_mic_ctx.cbor_buffer.ptr + end_of_header_ix), ref_size);
+    tr = ei_mic_ctx.signature_ctx->update(ei_mic_ctx.signature_ctx, ((uint8_t*)ei_mic_ctx.cbor_buffer.ptr + end_of_header_ix), ref_size);
     if (tr != 0) {
         ei_printf("Failed to update signature from header (%d)\n", tr);
         return false;
@@ -427,7 +427,7 @@ bool ei_microphone_sample_start(void)
     while(record_status) {
         dev->set_state(eiStateSampling);
     };
-  
+
     int ctx_err = ei_mic_ctx.signature_ctx->finish(ei_mic_ctx.signature_ctx, ei_mic_ctx.hash_buffer.buffer);
     if (ctx_err != 0) {
         ei_printf("Failed to finish signature (%d)\n", ctx_err);

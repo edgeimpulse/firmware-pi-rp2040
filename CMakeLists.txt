@@ -16,12 +16,7 @@ set(CMAKE_CXX_STANDARD 11)
 
 pico_sdk_init()
 
-# Use hardware acceleration for DSP and Neural Network code
-# You'll need to disable these on non-Arm cores
-add_definitions(-DEIDSP_USE_CMSIS_DSP=1
-                -DEIDSP_LOAD_CMSIS_DSP_SOURCES=1
-                -DEI_CLASSIFIER_TFLITE_ENABLE_CMSIS_NN=1
-                -DEIDSP_QUANTIZE_FILTERBANK=0
+add_definitions(-DEIDSP_QUANTIZE_FILTERBANK=0
                 -DFREERTOS_ENABLED=1
                 -DARM_MATH_LOOPUNROLL
                 )
@@ -104,7 +99,7 @@ target_include_directories(ei_rp2040_firmware PRIVATE
     ${FIRMWARE_SDK_FOLDER}/at-server
     ThirdParty/Seeed_Arduino_UltrasonicRanger
     ThirdParty/Wire/src
-    ThirdParty/Arduino_LSM6DSOX/src  
+    ThirdParty/Arduino_LSM6DSOX/src
     ThirdParty/rp2040_DHT11_lib
     ThirdParty/PDM/src/include
 )

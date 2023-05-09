@@ -49,6 +49,7 @@ static bool create_header(sensor_aq_payload_info *payload);
 
 /* Private variables ------------------------------------------------------- */
 static uint32_t samples_required;
+static uint32_t samples_required_increase;
 static uint32_t current_sample;
 static uint32_t sample_buffer_size;
 static uint32_t headerOffset = 0;
@@ -160,8 +161,10 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
     ei_printf("\tHMAC Key: %s\n", dev->get_sample_hmac_key().c_str());
     ei_printf("\tFile name: %s\n", dev->get_sample_label().c_str());
 
-    samples_required = (uint32_t)((dev->get_sample_length_ms()) / dev->get_sample_interval_ms());
-    sample_buffer_size = (samples_required * sample_size) * 2;
+    samples_required = (uint32_t)((float)dev->get_sample_length_ms());
+    samples_required_increase = (uint32_t)dev->get_sample_interval_ms();
+
+    sample_buffer_size = ((uint32_t)((dev->get_sample_length_ms()) / dev->get_sample_interval_ms()) * sample_size) * 2;
     current_sample = 0;
 
     ei_printf("Samples req: %d\n", samples_required);
@@ -192,7 +195,7 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
         return false;
     }
     
-	ei_printf("Sampling...\n");
+	ei_printf("Sampling...\n");    
 
     while(current_sample < samples_required) {
         dev->set_state(eiStateSampling);
@@ -353,8 +356,9 @@ static void finish_and_upload(char *filename, uint32_t sample_length_ms)
 static bool sample_data_callback(const void *sample_buf, uint32_t byteLenght)
 {
     sensor_aq_add_data(&ei_mic_ctx, (float *)sample_buf, byteLenght / sizeof(float));
+    current_sample += samples_required_increase;    
 
-    if (++current_sample > samples_required) {
+    if(current_sample > samples_required) {
         return true;
     } 
     else {
