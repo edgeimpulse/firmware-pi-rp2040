@@ -9,7 +9,7 @@ Edge Impulse enables developers to create the next generation of intelligent dev
 ### Hardware
 
 - Raspberry Pi RP2040 based development boards, preferably Raspberry Pi Pico or Arduino Nano RP2040 Connect.
-- (Optional) If you are using Raspberry Pi Pico, [Grove Shield for Pi Pico](https://wiki.seeedstudio.com/Grove_Shield_for_Pi_Pico_V1.0/) makes it easier to connect external sensors for data collection/inference.
+- (Optional) If you are using Raspberry Pi Pico, [Grove Shield for Pi Pico](https://wiki.seeedstudio.com/Grove-Starter-Kit-for-Raspberry-Pi-Pico/) makes it easier to connect external sensors for data collection/inference.
 
 ### Tools
 The below instructions assume you are using   Debian-based  Linux  distribution.  Alternative  instructions  for  those
