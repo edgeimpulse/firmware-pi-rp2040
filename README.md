@@ -35,9 +35,15 @@ git clone --recurse-submodules https://github.com/raspberrypi/pico-sdk
 export PICO_SDK_PATH="~/pico-sdk"
 ```
 
+## Download the EdgeImpulse firmware
+```bash
+git clone --recurse-submodules https://github.com/edgeimpulse/firmware-pi-rp2040
+```
+
 ## Building the application
 Then from the firmware folder execute:
 ```bash
+cd firmware-pi-rp2040
 mkdir build && cd build
 cmake ..
 make -j4
@@ -49,6 +55,17 @@ mkdir build && cd build
 cmake .. -DDEFINE_DEBUG=ON
 make -j4
 ```
+
+## Building for the Nano RP2040 Connect
+```bash
+cmake -DPICO_BOARD=arduino_nano_rp2040_connect ..
+make -j4
+```
+
+## Building for different boards
+If you need to build firmware for other boards, follow the instructions for building different boards at github.com/raspberrypi/pico-sdk
+
+## Flashing firmware
 
 The  fastest  method  to  load  firmware  onto  a  RP2040-based  board  for  the  first  time  is  by  mounting  it  as  a  USB  Mass
 Storage  Device.  Doing  this  allows  you  to  drag  a  file  onto  the  board  to  program  the  flash.  Go  ahead  and  connect  the
