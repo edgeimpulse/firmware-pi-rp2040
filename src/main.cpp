@@ -35,6 +35,7 @@
 
 #include "ei_dht11sensor.h"
 #include "ei_inertialsensor.h"
+#include "ei_motionsensor.h"
 #include "ei_analogsensor.h"
 #include "ei_ultrasonicsensor.h"
 
@@ -69,6 +70,11 @@ void ei_init(void)
         ei_printf("Inertial sensor communication error occurred\r\n");
     }
 
+    /* Setup the motion sensor */
+    if (ei_motion_sensor_init() == false) {
+        ei_printf("Motion sensor communication error occurred\r\n");
+    }
+
     /* Setup the temp&humidity sensor */
     if (ei_dht11_sensor_init() == false) {
         ei_printf("DHT11 initialization failed\r\n");
@@ -100,17 +106,16 @@ void ei_init(void)
 
 void ei_main(void *pvParameters)
 {
-
     /* Initialize Edge Impulse sensors and commands */
     ei_init();
 
     while(true) {
-        /* handle command comming from uart */
+        /* handle command coming from uart */
         char data = ei_get_serial_byte();
 
         while (data != 0xFF) {
-            at->handle(data);
-            data = ei_get_serial_byte();
+           at->handle(data);
+           data = ei_get_serial_byte();
         }
     }
 }
@@ -125,11 +130,10 @@ int main(void)
     while (!tud_cdc_connected()) {
         tight_loop_contents();
     }
-    
+
     gpio_put(LED_PIN, 0);
 
-    /* Start the two tasks as described in the comments at the top of this
-    file. */
+    /* Start the two tasks as described in the comments at the top of this file. */
     xTaskCreate(ei_main,		/* The function that implements the task. */
                 "ei_main", 		/* The text name assigned to the task - for debug only as it is not used by the kernel. */
                 1024, 			/* The size of the stack to allocate to the task. */
