@@ -35,6 +35,14 @@ add_executable(ei_rp2040_firmware
     src/main.cpp
 )
 
+# Define options for different boards
+OPTION(BOARD_MICROMOD "Select MicroMod board" OFF)
+
+# Conditionally define macros based on the selected board
+if (BOARD_MICROMOD)
+    target_compile_definitions(ei_rp2040_firmware PRIVATE BOARD_MICROMOD=1)
+endif()
+
 OPTION(DEFINE_PIN_UART
     "Only use TX/RX pins and not USB UART"
     OFF)
@@ -100,6 +108,7 @@ target_include_directories(ei_rp2040_firmware PRIVATE
     ThirdParty/Seeed_Arduino_UltrasonicRanger
     ThirdParty/Wire/src
     ThirdParty/Arduino_LSM6DSOX/src
+    ThirdParty/LIS2DH12/src
     ThirdParty/rp2040_DHT11_lib
     ThirdParty/PDM/src/include
 )
