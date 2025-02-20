@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _EI_CLASSIFIER_INFERENCING_ENGINE_ONNX_TIDL_H_
@@ -77,15 +94,15 @@ int printTensorInfo(Ort::Session *session, std::vector<const char *> *input_node
     Ort::TypeInfo type_info = (*session).GetInputTypeInfo(0);
     auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
     std::vector<int64_t> input_node_dims = tensor_info.GetShape();
-    ei_printf("LOG_INFO: number of inputs:%d \n", num_input_nodes);
-    ei_printf("LOG_INFO: number of outputs: %d\n", num_output_nodes);
+    ei_printf("LOG_INFO: number of inputs: %d\n", (int)num_input_nodes);
+    ei_printf("LOG_INFO: number of outputs: %d\n", (int)num_output_nodes);
     ei_printf("LOG_INFO: input(0) name: %s\n", (*input_node_names)[0]);
 
     Ort::TypeInfo type_info_out = (*session).GetOutputTypeInfo(0);
     auto tensor_info_out = type_info_out.GetTensorTypeAndShapeInfo();
     std::vector<int64_t> output_node_dims = tensor_info_out.GetShape();
     /* iterate over all input nodes */
-    for (int i = 0; i < num_input_nodes; i++)
+    for (int i = 0; i < (int)num_input_nodes; i++)
     {
         /* print input node names */
         ei_printf("LOG_INFO: Input %d : name=%s\n", i, (*input_node_names)[i]);
@@ -110,7 +127,7 @@ int printTensorInfo(Ort::Session *session, std::vector<const char *> *input_node
         return EI_IMPULSE_ONNX_ERROR;
     }
 
-    for (int i = 0; i < num_output_nodes; i++)
+    for (int i = 0; i < (int)num_output_nodes; i++)
     {
         /* print output node names */
         ei_printf("LOG_INFO: Output %d : name=%s\n", i, (*output_node_names)[i]);
@@ -124,7 +141,7 @@ int printTensorInfo(Ort::Session *session, std::vector<const char *> *input_node
         /* print output shapes/dims */
         output_node_dims = tensor_info.GetShape();
         ei_printf("LOG_INFO: Output %d : num_dims=%zu\n", i, output_node_dims.size());
-        for (int j = 0; j < output_node_dims.size(); j++)
+        for (int j = 0; j < (int)output_node_dims.size(); j++)
         {
             ei_printf("LOG_INFO: Output %d : dim %d=%jd\n", i, j, output_node_dims[j]);
         }
@@ -243,11 +260,11 @@ static EI_IMPULSE_ERROR inference_onnx_setup(
     /* output information */
     size_t num_output_nodes = session->GetOutputCount();
     std::vector<const char *> output_node_names(num_output_nodes);
-    for (int i = 0; i < num_output_nodes; i++)
+    for (int i = 0; i < (int)num_output_nodes; i++)
     {
         output_node_names[i] = session->GetOutputName(i, allocator);
     }
-    for (int i = 0; i < num_input_nodes; i++)
+    for (int i = 0; i < (int)num_input_nodes; i++)
     {
         input_node_names[i] = session->GetInputName(i, allocator);
     }
@@ -296,7 +313,7 @@ static EI_IMPULSE_ERROR inference_onnx_setup(
     *binding_ptr = binding;
     binding->BindInput(input_node_names[0], (*input_tensors)[0]);
 
-    for(int idx=0; idx < num_output_nodes; idx++)
+    for(int idx=0; idx < (int)num_output_nodes; idx++)
     {
         auto node_dims = output_tensors_warm_up[idx].GetTypeInfo().GetTensorTypeAndShapeInfo().GetShape();
         size_t tensor_size = 1;
@@ -347,6 +364,7 @@ static EI_IMPULSE_ERROR inference_onnx_setup(
  * @return  EI_IMPULSE_OK if successful
  */
 static EI_IMPULSE_ERROR inference_onnx_run(const ei_impulse_t *impulse,
+    void *config_ptr,
     uint64_t ctx_start_us,
     std::vector<Ort::Value>* input_tensors,
     std::vector<Ort::Value>* output_tensors,
@@ -355,6 +373,8 @@ static EI_IMPULSE_ERROR inference_onnx_run(const ei_impulse_t *impulse,
     Ort::IoBinding* binding,
     ei_impulse_result_t *result,
     bool debug) {
+
+    ei_learning_block_config_tflite_graph_t *block_config = (ei_learning_block_config_tflite_graph_t*)config_ptr;
 
     session->Run(*run_options, *binding);
 
@@ -381,14 +401,14 @@ static EI_IMPULSE_ERROR inference_onnx_run(const ei_impulse_t *impulse,
     EI_IMPULSE_ERROR fill_res = EI_IMPULSE_OK;
 
     // NOTE: for now only yolox object detection supported
-    if (impulse->object_detection) {
-        switch (impulse->object_detection_last_layer) {
+    if (block_config->object_detection) {
+        switch (block_config->object_detection_last_layer) {
             case EI_CLASSIFIER_LAST_LAYER_YOLOX: {
-                #if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+                if (block_config->quantized == 1) {
                     ei_printf("ERR: YOLOX does not support quantized inference\n");
                     return EI_IMPULSE_UNSUPPORTED_INFERENCING_ENGINE;
-                #else
-
+                }
+                else {
                     if (debug) {
                         ei_printf("YOLOX OUTPUT (%d ms.): ", result->timing.classification);
                         for (size_t ix = 0; ix < output_tensor_features_count; ix++) {
@@ -399,21 +419,22 @@ static EI_IMPULSE_ERROR inference_onnx_run(const ei_impulse_t *impulse,
                     }
                     fill_res = fill_result_struct_f32_yolox_detect(
                         impulse,
+                        block_config,
                         result,
                         (float*)out_data,
                         output_tensor_features_count);
-                #endif
+                }
                 break;
             }
             default: {
                 ei_printf("ERR: Unsupported object detection last layer (%d)\n",
-                    impulse->object_detection_last_layer);
+                    block_config->object_detection_last_layer);
                 break;
             }
         }
     }
     else {
-#if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
 
     switch (output_tensor_type) {
         case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: {
@@ -474,7 +495,10 @@ static EI_IMPULSE_ERROR inference_onnx_run(const ei_impulse_t *impulse,
  */
 EI_IMPULSE_ERROR run_nn_inference(
     const ei_impulse_t *impulse,
-    ei::matrix_t *afmatrix,
+    ei_feature_t *afmatrix,
+    uint32_t learn_block_index,
+    uint32_t* input_block_ids,
+    uint32_t input_block_ids_size,
     ei_impulse_result_t *result,
     void *config_ptr,
     bool debug = false)
@@ -519,12 +543,14 @@ EI_IMPULSE_ERROR run_nn_inference(
     size_t height = impulse->input_height;
     size_t width = impulse->input_width;
 
+    ei::matrix_t* matrix = afmatrix[0].matrix;
+
     int dest_ix = 0;
     for (size_t c=0; c < channels; c++) {
         for (size_t h=0; h < height; h++) {
             for (size_t w=0; w < width; w++) {
                 uint32_t src_ix = channels * width * h + w*channels + c;
-                fmatrix.buffer[dest_ix++] = afmatrix->buffer[src_ix];
+                fmatrix.buffer[dest_ix++] = matrix->buffer[src_ix];
             }
         }
     }
@@ -544,6 +570,7 @@ EI_IMPULSE_ERROR run_nn_inference(
 
     ctx_start_us = ei_read_timer_us();
     EI_IMPULSE_ERROR run_res = inference_onnx_run(impulse,
+        config_ptr,
         ctx_start_us,
         &input_tensors,
         &output_tensors,
@@ -559,7 +586,7 @@ EI_IMPULSE_ERROR run_nn_inference(
     return EI_IMPULSE_OK;
 }
 
-#if EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
 /**
  * Special function to run the classifier on images, only works on TFLite models (either interpreter or EON or for tensaiflow)
  * that allocates a lot less memory by quantizing in place. This only works if 'can_run_classifier_image_quantized'
@@ -673,6 +700,7 @@ EI_IMPULSE_ERROR run_nn_inference_image_quantized(
 
     ctx_start_us = ei_read_timer_us();
     EI_IMPULSE_ERROR run_res = inference_onnx_run(impulse,
+        config_ptr,
         ctx_start_us,
         &input_tensors,
         &output_tensors,
@@ -687,7 +715,7 @@ EI_IMPULSE_ERROR run_nn_inference_image_quantized(
 
     return EI_IMPULSE_OK;
 }
-#endif // EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#endif // EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
 
 #endif // #if (EI_CLASSIFIER_INFERENCING_ENGINE == EI_CLASSIFIER_ONNX_TIDL) && (EI_CLASSIFIER_COMPILED != 1)
 #endif // _EI_CLASSIFIER_INFERENCING_ENGINE_ONNX_TIDL_H_

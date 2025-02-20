@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /* Include ----------------------------------------------------------------- */
@@ -104,7 +121,7 @@ bool ei_add_sensor_to_fusion_list(ei_device_fusion_sensor_t sensor)
 bool ei_connect_fusion_list(const char *input_list, ei_fusion_list_format format)
 {
     char *buff;
-    bool is_fusion;
+    bool is_fusion = false;
 
     num_fusions = 0;
     num_fusion_axis = 0;
@@ -338,11 +355,6 @@ bool ei_fusion_setup_data_sampling(void)
         return false;
     }
 
-#if MULTI_FREQ_ENABLED == 1
-    memset(multi_sampling_freq, 0, sizeof(multi_sampling_freq));
-    memset(multi_freq_combination, 0, sizeof(multi_freq_combination));
-#endif
-
     // Calculate number of bytes available on flash for sampling, reserve 1 block for header + overhead
     uint32_t available_bytes = (mem->get_available_sample_blocks() - 1) * mem->block_size;
     // Check available sample size before sampling for the selected frequency
@@ -375,13 +387,6 @@ bool ei_fusion_setup_data_sampling(void)
             payload_bytes += strlen(fusion_sensors[i]->sensors[j].name) +
                 strlen(fusion_sensors[i]->sensors[j].units) + SENSORS_BYTE_OFFSET;
         }
-#if (MULTI_FREQ_ENABLED == 1)
-        if (num_fusions > 1) {
-            for (int j = 0; j < EI_MAX_FREQUENCIES; j++) {
-                multi_freq_combination[i][j] = (fusion_sensors[i]->frequencies[j]);    // storing all possible frequencies for each sensor
-            }
-        }
-#endif
     }
 
     // use heap for unit name, add 4 bytes for padding
@@ -491,8 +496,8 @@ const vector<fused_sensors_t> &ei_get_sensor_fusion_list(void)
 static void print_fusion_list(int r, uint32_t ingest_memory_size)
 {
     /* A temporary array to store all combination one by one */
-    int data[r];
-    int arr[fusable_sensor_list.size()];
+    auto data = new int[r];
+    auto arr = new int[fusable_sensor_list.size()];
 
     for (unsigned int i = 0; i < fusable_sensor_list.size(); i++) {
         arr[i] = i;
@@ -500,6 +505,8 @@ static void print_fusion_list(int r, uint32_t ingest_memory_size)
 
     /* Print all combination using temporary array 'data[]' */
     print_all_combinations(arr, data, 0, 0, r, ingest_memory_size);
+    delete[] data;
+    delete[] arr;
 }
 
 /**
@@ -606,16 +613,6 @@ static void print_all_combinations(
             else {
                 sens.max_sample_length  = 0;
             }
-
-#if 0
-            for (float &local_freq : found_freq_combinations) {   /* for each found freq */
-                sens.max_sample_length =
-                    (int)(ingest_memory_size / (local_freq * (sizeof(fusion_sample_format_t) * local_num_fusion_axis) * 2));
-
-                sens.frequencies.push_back(local_freq);
-            }
-#endif
-
 #else
             // fusion, use set freq
             sens.max_sample_length =
@@ -659,9 +656,23 @@ static int generate_bit_flags(int dec)
 static bool add_sensor(int sensor_ix, char *name_buffer)
 {
     bool added_loc;
-    bool is_fusion = false;
+    bool is_fusion = false;    
 
-    if (strstr(name_buffer, fusable_sensor_list[sensor_ix].name)) { // is a matching sensor
+    char* buf = (char *)ei_malloc(strlen(fusable_sensor_list[sensor_ix].name) + 1);
+
+    if (buf == NULL) {
+        return false;
+    }
+
+    memset(buf, 0, strlen(fusable_sensor_list[sensor_ix].name) + 1);
+    strncpy(buf, fusable_sensor_list[sensor_ix].name, strlen(fusable_sensor_list[sensor_ix].name));
+
+    if (strstr(fusable_sensor_list[sensor_ix].name, "(")
+        && strstr(name_buffer, "(") == NULL ) {  // full name has ( ) => BUT not the fusion string received, which probably means is using abbreviation
+        buf[strcspn(fusable_sensor_list[sensor_ix].name , " (")] = '\0';
+    }
+
+    if (strstr(name_buffer, buf)) { // is a matching sensor
         added_loc = false;
         for (int j = 0; j < num_fusions; j++) {
             if (strstr(
@@ -683,6 +694,8 @@ static bool add_sensor(int sensor_ix, char *name_buffer)
         }
         is_fusion = true;
     }
+
+    ei_free(buf);
 
     return is_fusion;
 }
@@ -944,6 +957,16 @@ static bool ei_fusion_calc_optimal_frequencies(uint8_t row, uint8_t col, float f
 
     if (freq_objective == 0.0) {
         return false;
+    }
+
+    memset(multi_sampling_freq, 0, sizeof(multi_sampling_freq));
+    memset(multi_freq_combination, 0, sizeof(multi_freq_combination));
+
+    for (int i = 0; i < row; i++) {
+        for (int j = 0; j < col; j++) {
+            //
+            multi_freq_combination[i][j] = fusion_sensors[i]->frequencies[j];
+        }
     }
 
     for (int i = 0; i < row; i++) {  // for each sensors

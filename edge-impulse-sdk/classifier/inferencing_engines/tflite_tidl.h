@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _EI_CLASSIFIER_INFERENCING_ENGINE_TFLITE_TIDL_H_
@@ -52,12 +69,15 @@ void *out_ptrs[16] = {NULL};
 
 EI_IMPULSE_ERROR run_nn_inference(
     const ei_impulse_t *impulse,
-    ei::matrix_t *fmatrix,
+    ei_feature_t *fmatrix,
+    uint32_t learn_block_index,
+    uint32_t* input_block_ids,
+    uint32_t input_block_ids_size,
     ei_impulse_result_t *result,
     void *config_ptr,
-    bool debug = false)
+    bool debug)
 {
-    ei_learning_block_config_tflite_graph_t *config = (ei_learning_block_config_tflite_graph_t*)config_ptr;
+    ei_learning_block_config_tflite_graph_t *block_config = (ei_learning_block_config_tflite_graph_t*)config_ptr;
 
     static std::unique_ptr<tflite::FlatBufferModel> model = nullptr;
     static std::unique_ptr<tflite::Interpreter> interpreter = nullptr;
@@ -144,7 +164,7 @@ EI_IMPULSE_ERROR run_nn_inference(
     }
 
     // Obtain pointers to the model's input and output tensors.
-#if EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
     int8_t* input = interpreter->typed_input_tensor<int8_t>(0);
 #else
     float* input = interpreter->typed_input_tensor<float>(0);
@@ -154,22 +174,38 @@ EI_IMPULSE_ERROR run_nn_inference(
         return EI_IMPULSE_INPUT_TENSOR_WAS_NULL;
     }
 
-    for (uint32_t ix = 0; ix < fmatrix->rows * fmatrix->cols; ix++) {
-    if (impulse->object_detection) {
-#if EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
-        float pixel = (float)fmatrix->buffer[ix];
-        input[ix] = static_cast<uint8_t>((pixel / input->tflite_input_scale) + input->tflite_input_zeropoint);
+    size_t mtx_size = impulse->dsp_blocks_size + impulse->learning_blocks_size;
+
+    for (size_t i = 0; i < input_block_ids_size; i++) {
+#if EI_CLASSIFIER_SINGLE_FEATURE_INPUT == 0
+        uint16_t cur_mtx = input_block_ids[i];
+        ei::matrix_t* matrix = NULL;
+
+        if (!find_mtx_by_idx(fmatrix, &matrix, cur_mtx, mtx_size)) {
+            ei_printf("ERR: Cannot find matrix with id %zu\n", cur_mtx);
+            return EI_IMPULSE_INVALID_SIZE;
+        }
 #else
-        input[ix] = fmatrix->buffer[ix];
+        ei::matrix_t* matrix = fmatrix[0].matrix;
 #endif
-    }
-    else {
-#if EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
-        input[ix] = static_cast<int8_t>(round(fmatrix->buffer[ix] / input->tflite_input_scale) + input->tflite_input_zeropoint);
+
+        for (uint32_t ix = 0; ix < matrix->rows * matrix->cols; ix++) {
+            if (block_config->object_detection) {
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
+                float pixel = (float)matrix->buffer[ix];
+                input[ix] = static_cast<uint8_t>((pixel / input->tflite_input_scale) + input->tflite_input_zeropoint);
 #else
-        input[ix] = fmatrix->buffer[ix];
+                input[ix] = matrix->buffer[ix];
 #endif
-    }
+            }
+            else {
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
+                input[ix] = static_cast<int8_t>(round(matrix->buffer[ix] / input->tflite_input_scale) + input->tflite_input_zeropoint);
+#else
+                input[ix] = matrix->buffer[ix];
+#endif
+            }
+        }
     }
 
     uint64_t ctx_start_us = ei_read_timer_us();
@@ -181,10 +217,10 @@ EI_IMPULSE_ERROR run_nn_inference(
     result->timing.classification_us = ctx_end_us - ctx_start_us;
     result->timing.classification = (int)(result->timing.classification_us / 1000);
 
-#if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
-    int8_t* out_data = interpreter->typed_output_tensor<int8_t>(config->output_data_tensor);
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
+    int8_t* out_data = interpreter->typed_output_tensor<int8_t>(block_config->output_data_tensor);
 #else
-    float* out_data = interpreter->typed_output_tensor<float>(config->output_data_tensor);
+    float* out_data = interpreter->typed_output_tensor<float>(block_config->output_data_tensor);
 #endif
 
     if (debug) {
@@ -213,7 +249,6 @@ EI_IMPULSE_ERROR run_nn_inference(
                 }
                 ei_printf(")\n");
             }
-
         }
     }
 
@@ -227,70 +262,100 @@ EI_IMPULSE_ERROR run_nn_inference(
 
     EI_IMPULSE_ERROR fill_res = EI_IMPULSE_OK;
 
-    if (impulse->object_detection) {
-        switch (impulse->object_detection_last_layer) {
+    if (block_config->object_detection) {
+        switch (block_config->object_detection_last_layer) {
             case EI_CLASSIFIER_LAST_LAYER_FOMO: {
-                #if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
-                    fill_res = fill_result_struct_i8_fomo(impulse, result, out_data, out_data->tflite_output_zeropoint, out_data->tflite_output_scale,
-                        impulse->fomo_output_size, impulse->fomo_output_size);
-                #else
-                    fill_res = fill_result_struct_f32_fomo(impulse, result, out_data,
-                        impulse->fomo_output_size, impulse->fomo_output_size);
-                #endif
+                if (block_config->quantized == 1) {
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
+                    fill_res = fill_result_struct_i8_fomo(
+                        impulse,
+                        block_config,
+                        result,
+                        out_data,
+                        out_data->tflite_output_zeropoint,
+                        out_data->tflite_output_scale,
+                        impulse->fomo_output_size,
+                        impulse->fomo_output_size);
+#endif
+                }
+                else {
+                    fill_res = fill_result_struct_f32_fomo(
+                        impulse,
+                        block_config,
+                        result,
+                        out_data,
+                        impulse->fomo_output_size,
+                        impulse->fomo_output_size);
+                }
                 break;
             }
             case EI_CLASSIFIER_LAST_LAYER_SSD: {
-                float *scores_tensor = interpreter->typed_output_tensor<float>(config->output_score_tensor);
-                float *label_tensor = interpreter->typed_output_tensor<float>(config->output_labels_tensor);
+                float *scores_tensor = interpreter->typed_output_tensor<float>(block_config->output_score_tensor);
+                float *label_tensor = interpreter->typed_output_tensor<float>(block_config->output_labels_tensor);
                 if (!scores_tensor) {
                     return EI_IMPULSE_SCORE_TENSOR_WAS_NULL;
                 }
                 if (!label_tensor) {
                     return EI_IMPULSE_LABEL_TENSOR_WAS_NULL;
                 }
-                #if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+                if (block_config->quantized == 1) {
                     ei_printf("ERR: MobileNet SSD does not support quantized inference\n");
                     return EI_IMPULSE_UNSUPPORTED_INFERENCING_ENGINE;
-                #else
-                    fill_res = fill_result_struct_f32_object_detection(impulse, result, out_data, scores_tensor, label_tensor, debug);
-                #endif
+                }
+                else {
+                    fill_res = fill_result_struct_f32_object_detection(
+                        impulse,
+                        block_config,
+                        result,
+                        out_data,
+                        scores_tensor,
+                        label_tensor,
+                        debug);
+                }
                 break;
             }
             case EI_CLASSIFIER_LAST_LAYER_YOLOV5:
             case EI_CLASSIFIER_LAST_LAYER_YOLOV5_V5_DRPAI: {
-                #if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+                if (block_config->quantized == 1) {
                     ei_printf("ERR: YOLOv5 does not support quantized inference\n");
                     return EI_IMPULSE_UNSUPPORTED_INFERENCING_ENGINE;
-                #else
-                    int version = impulse->object_detection_last_layer == EI_CLASSIFIER_LAST_LAYER_YOLOV5_V5_DRPAI ?
+                }
+                else {
+                    int version = block_config->object_detection_last_layer == EI_CLASSIFIER_LAST_LAYER_YOLOV5_V5_DRPAI ?
                         5 : 6;
                     fill_res = fill_result_struct_f32_yolov5(
                         impulse,
+                        block_config,
                         result,
                         version,
                         out_data,
-                        impulse->tflite_output_features_count);
-                #endif
+                        impulse->tflite_output_features_count,
+                        debug);
+                }
                 break;
             }
             case EI_CLASSIFIER_LAST_LAYER_YOLOX: {
-                #if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+                if (block_config->quantized == 1) {
                     ei_printf("ERR: YOLOX does not support quantized inference\n");
                     return EI_IMPULSE_UNSUPPORTED_INFERENCING_ENGINE;
-                #else
+                }
+                else {
                     fill_res = fill_result_struct_f32_yolox(
                         impulse,
+                        block_config,
                         result,
                         out_data,
-                        impulse->tflite_output_features_count);
-                #endif
+                        impulse->tflite_output_features_count,
+                        debug);
+                }
                 break;
             }
             case EI_CLASSIFIER_LAST_LAYER_YOLOV7: {
-                #if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+                if (block_config->quantized == 1) {
                     ei_printf("ERR: YOLOV7 does not support quantized inference\n");
                     return EI_IMPULSE_UNSUPPORTED_INFERENCING_ENGINE;
-                #else
+                }
+                else {
                     TfLiteTensor *output = interpreter->output_tensor(0);
                     size_t output_feature_count = 1;
                     for (int ix = 0; ix < output->dims->size; ix++) {
@@ -298,21 +363,22 @@ EI_IMPULSE_ERROR run_nn_inference(
                     }
                     fill_res = fill_result_struct_f32_yolov7(
                         impulse,
+                        block_config,
                         result,
                         output->data.f,
                         output_feature_count);
-                #endif
+                }
                 break;
             }
             default: {
                 ei_printf("ERR: Unsupported object detection last layer (%d)\n",
-                    impulse->object_detection_last_layer);
+                    block_config->object_detection_last_layer);
                 break;
             }
         }
     }
     else {
-#if EI_CLASSIFIER_TFLITE_OUTPUT_QUANTIZED == 1
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
         fill_res = fill_result_struct_i8(impulse, result, out_data, out_data->tflite_output_zeropoint, out_data->tflite_output_scale, debug);
 #else
         fill_res = fill_result_struct_f32(impulse, result, out_data, debug);

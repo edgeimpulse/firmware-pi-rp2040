@@ -1,20 +1,36 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
-
 #ifndef _EIDSP_NUMPY_H_
 #define _EIDSP_NUMPY_H_
 
@@ -25,6 +41,12 @@
 #ifndef __has_include
 #define __has_include 1
 #endif // __has_include
+
+// Arduino build defines abs as a macro. That is invalid C++, and breaks
+// libc++'s <complex> header, undefine it.
+#ifdef abs
+#undef abs
+#endif
 
 #include <stdint.h>
 #include <string.h>
@@ -39,13 +61,31 @@
 #include "ei_utils.h"
 #include "dct/fast-dct-fft.h"
 #include "kissfft/kiss_fftr.h"
+#include "edge-impulse-sdk/porting/ei_logging.h"
+
 #if __has_include("model-parameters/model_metadata.h")
 #include "model-parameters/model_metadata.h"
 #endif
-#if EIDSP_USE_CMSIS_DSP
-#include "edge-impulse-sdk/CMSIS/DSP/Include/arm_math.h"
-#include "edge-impulse-sdk/CMSIS/DSP/Include/arm_const_structs.h"
+
+#if EIDSP_USE_CEVA_DSP
+#include "edge-impulse-sdk/dsp/dsp_engines/ei_ceva_dsp.h"
+#elif EIDSP_USE_CMSIS_DSP
+#include "edge-impulse-sdk/dsp/dsp_engines/ei_arm_cmsis_dsp.h"
+#else
+#define EIDSP_INCLUDE_KISSFFT 1
+#include "edge-impulse-sdk/dsp/dsp_engines/ei_no_hw_dsp.h"
 #endif
+
+// More decisions on kissfft
+#ifndef EIDSP_INCLUDE_KISSFFT
+
+#if defined(EI_CLASSIFIER_NON_STANDARD_FFT_SIZES) && !EI_CLASSIFIER_NON_STANDARD_FFT_SIZES
+#define EIDSP_INCLUDE_KISSFFT 0
+#else
+#define EIDSP_INCLUDE_KISSFFT 1
+#endif // EI_CLASSIFIER_NON_STANDARD_FFT_SIZES
+
+#endif // EIDSP_INCLUDE_KISSFFT
 
 // For the following CMSIS includes, we want to use the C fallback, so include whether or not we set the CMSIS flag
 #include "edge-impulse-sdk/CMSIS/DSP/Include/dsp/statistics_functions.h"
@@ -58,7 +98,14 @@
 
 #define EI_MAX_UINT16 65535
 
+#ifndef M_PI
+#define M_PI 3.1415926
+#endif
+
 namespace ei {
+
+using fvec = ei_vector<float>;
+using ivec = ei_vector<int>;
 
 // clang-format off
 // lookup table for quantized values between 0.0f and 1.0f
@@ -270,7 +317,7 @@ public:
      * @param out_matrix Pointer to out matrix (MxK)
      * @returns EIDSP_OK if OK
      */
-    static inline int dot_by_row(int i, float *row, uint32_t matrix1_cols, matrix_t *matrix2, matrix_t *out_matrix) {
+    static  int dot_by_row(int i, float *row, uint32_t matrix1_cols, matrix_t *matrix2, matrix_t *out_matrix) {
         if (matrix1_cols != matrix2->rows) {
             EIDSP_ERR(EIDSP_MATRIX_SIZE_MISMATCH);
         }
@@ -310,7 +357,7 @@ public:
      * @param out_matrix Pointer to out matrix (MxK)
      * @returns EIDSP_OK if OK
      */
-    static inline int dot_by_row(int i, float *row, size_t matrix1_cols,
+    static  int dot_by_row(int i, float *row, size_t matrix1_cols,
         quantized_matrix_t *matrix2, matrix_t *out_matrix)
     {
         if (matrix1_cols != matrix2->rows) {
@@ -332,37 +379,40 @@ public:
     }
 
     static void transpose_in_place(matrix_t *matrix) {
-        size_t size = matrix->cols * matrix->rows - 1;
-        float temp; // temp for swap
-        size_t next; // next item to swap
-        size_t cycleBegin; // index of start of cycle
-        size_t i; // location in matrix
-        size_t all_done_mark = 1;
-        ei_vector<bool> done(size+1,false);
+        // Don't bother if either dim is one, just need to swap the dimension sizes
+        if( matrix->rows != 1 && matrix->cols != 1) {
+            size_t size = matrix->cols * matrix->rows - 1;
+            float temp; // temp for swap
+            size_t next; // next item to swap
+            size_t cycleBegin; // index of start of cycle
+            size_t i; // location in matrix
+            size_t all_done_mark = 1;
+            ei_vector<bool> done(size+1,false);
 
-        i = 1; // Note that matrix[0] and last element of matrix won't move
-        while (1)
-        {
-            cycleBegin = i;
-            temp = matrix->buffer[i];
-            do
+            i = 1; // Note that matrix[0] and last element of matrix won't move
+            while (1)
             {
-                size_t col = i % matrix->cols;
-                size_t row = i / matrix->cols;
-                // swap row and col to make new idx, b/c we want to know where in the transposed matrix
-                next = col*matrix->rows + row;
-                float temp2 = matrix->buffer[next];
-                matrix->buffer[next] = temp;
-                temp = temp2;
-                done[next] = true;
-                i = next;
-            }
-            while (i != cycleBegin);
+                cycleBegin = i;
+                temp = matrix->buffer[i];
+                do
+                {
+                    size_t col = i % matrix->cols;
+                    size_t row = i / matrix->cols;
+                    // swap row and col to make new idx, b/c we want to know where in the transposed matrix
+                    next = col*matrix->rows + row;
+                    float temp2 = matrix->buffer[next];
+                    matrix->buffer[next] = temp;
+                    temp = temp2;
+                    done[next] = true;
+                    i = next;
+                }
+                while (i != cycleBegin);
 
-            // start next cycle by find next not done
-            for (i = all_done_mark; done[i]; i++) {
-                all_done_mark++; // move the high water mark so we don't look again
-                if(i>=size) { goto LOOP_END; }
+                // start next cycle by find next not done
+                for (i = all_done_mark; done[i]; i++) {
+                    all_done_mark++; // move the high water mark so we don't look again
+                    if(i>=size) { goto LOOP_END; }
+                }
             }
         }
         LOOP_END:
@@ -488,6 +538,59 @@ public:
         return EIDSP_OK;
     }
 
+    static int dct_transform(float vector[], size_t len)
+    {
+        const size_t fft_data_out_size = (len / 2 + 1) * sizeof(ei::fft_complex_t);
+        const size_t fft_data_in_size = len * sizeof(float);
+
+        // Allocate KissFFT input / output buffer
+        fft_complex_t *fft_data_out =
+            (ei::fft_complex_t*)ei_dsp_calloc(fft_data_out_size, 1);
+        if (!fft_data_out) {
+            return ei::EIDSP_OUT_OF_MEM;
+        }
+
+        float *fft_data_in = (float*)ei_dsp_calloc(fft_data_in_size, 1);
+        if (!fft_data_in) {
+            ei_dsp_free(fft_data_out, fft_data_out_size);
+            return ei::EIDSP_OUT_OF_MEM;
+        }
+
+        // Preprocess the input buffer with the data from the vector
+        size_t halfLen = len / 2;
+        for (size_t i = 0; i < halfLen; i++) {
+            fft_data_in[i] = vector[i * 2];
+            fft_data_in[len - 1 - i] = vector[i * 2 + 1];
+        }
+        if (len % 2 == 1) {
+            fft_data_in[halfLen] = vector[len - 1];
+        }
+
+        int r = ei::numpy::rfft(fft_data_in, len, fft_data_out, (len / 2 + 1), len);
+        if (r != 0) {
+            ei_dsp_free(fft_data_in, fft_data_in_size);
+            ei_dsp_free(fft_data_out, fft_data_out_size);
+            return r;
+        }
+
+        size_t i = 0;
+        for (; i < len / 2 + 1; i++) {
+            float temp = i * M_PI / (len * 2);
+            vector[i] = fft_data_out[i].r * cos(temp) + fft_data_out[i].i * sin(temp);
+        }
+        //take advantage of hermetian symmetry to calculate remainder of signal
+        for (; i < len; i++) {
+            float temp = i * M_PI / (len * 2);
+            int conj_idx = len-i;
+            // second half bins not calculated would have just been the conjugate of the first half (note minus of imag)
+            vector[i] = fft_data_out[conj_idx].r * cos(temp) - fft_data_out[conj_idx].i * sin(temp);
+        }
+        ei_dsp_free(fft_data_in, fft_data_in_size);
+        ei_dsp_free(fft_data_out, fft_data_out_size);
+
+        return 0;
+    }
+
     /**
      * Return the Discrete Cosine Transform of arbitrary type sequence 2.
      * @param input Input array (of size N)
@@ -499,7 +602,7 @@ public:
             return EIDSP_OK;
         }
 
-        int ret = ei::dct::transform(input, N);
+        int ret = dct_transform(input, N);
         if (ret != EIDSP_OK) {
             EIDSP_ERR(ret);
         }
@@ -1209,64 +1312,19 @@ public:
             EIDSP_ERR(EIDSP_BUFFER_SIZE_MISMATCH);
         }
 
-        // truncate if needed
-        if (src_size > n_fft) {
-            src_size = n_fft;
-        }
+        fft_complex_t *fft_output = NULL;
+        auto ptr = EI_MAKE_TRACKED_POINTER(fft_output, n_fft_out_features);
+        EI_ERR_AND_RETURN_ON_NULL(fft_output, EIDSP_OUT_OF_MEM);
 
-        // declare input and output arrays
-        EI_DSP_MATRIX(fft_input, 1, n_fft);
-        if (!fft_input.buffer) {
-            EIDSP_ERR(EIDSP_OUT_OF_MEM);
-        }
-
-        // copy from src to fft_input
-        memcpy(fft_input.buffer, src, src_size * sizeof(float));
-        // pad to the rigth with zeros
-        memset(fft_input.buffer + src_size, 0, (n_fft - src_size) * sizeof(kiss_fft_scalar));
-
-#if EIDSP_USE_CMSIS_DSP
-        if (n_fft != 32 && n_fft != 64 && n_fft != 128 && n_fft != 256 &&
-            n_fft != 512 && n_fft != 1024 && n_fft != 2048 && n_fft != 4096) {
-            int ret = software_rfft(fft_input.buffer, output, n_fft, n_fft_out_features);
-            if (ret != EIDSP_OK) {
-                EIDSP_ERR(ret);
-            }
-        }
-        else {
-            // hardware acceleration only works for the powers above...
-            arm_rfft_fast_instance_f32 rfft_instance;
-            int status = cmsis_rfft_init_f32(&rfft_instance, n_fft);
-            if (status != ARM_MATH_SUCCESS) {
-                return status;
-            }
-
-            EI_DSP_MATRIX(fft_output, 1, n_fft);
-            if (!fft_output.buffer) {
-                EIDSP_ERR(EIDSP_OUT_OF_MEM);
-            }
-
-            arm_rfft_fast_f32(&rfft_instance, fft_input.buffer, fft_output.buffer, 0);
-
-            output[0] = fft_output.buffer[0];
-            output[n_fft_out_features - 1] = fft_output.buffer[1];
-
-            size_t fft_output_buffer_ix = 2;
-            for (size_t ix = 1; ix < n_fft_out_features - 1; ix += 1) {
-                float rms_result;
-                arm_rms_f32(fft_output.buffer + fft_output_buffer_ix, 2, &rms_result);
-                output[ix] = rms_result * sqrt(2);
-
-                fft_output_buffer_ix += 2;
-            }
-        }
-#else
-        int ret = software_rfft(fft_input.buffer, output, n_fft, n_fft_out_features);
+        int ret = rfft(src, src_size, fft_output, n_fft_out_features, n_fft);
         if (ret != EIDSP_OK) {
-            EIDSP_ERR(ret);
+            return ret;
         }
-#endif
 
+        // Calculate magnitude from complex values
+        for (size_t ix = 0; ix < n_fft_out_features; ix++) {
+            output[ix] = sqrt(fft_output[ix].r * fft_output[ix].r + fft_output[ix].i * fft_output[ix].i);
+        }
         return EIDSP_OK;
     }
 
@@ -1292,66 +1350,24 @@ public:
             src_size = n_fft;
         }
 
-        // declare input and output arrays
-        float *fft_input_buffer = NULL;
-        if (src_size == n_fft) {
-            fft_input_buffer = (float*)src;
-        }
-
-        EI_DSP_MATRIX_B(fft_input, 1, n_fft, fft_input_buffer);
+        // Unfortunately, arm fft (at least) modifies the input buffer AND does not work in place
+        // So we have to copy the input to a new buffer
+        EI_DSP_MATRIX(fft_input, 1, n_fft);
         if (!fft_input.buffer) {
             EIDSP_ERR(EIDSP_OUT_OF_MEM);
         }
 
-        if (!fft_input_buffer) {
-            // copy from src to fft_input
-            memcpy(fft_input.buffer, src, src_size * sizeof(float));
-            // pad to the rigth with zeros
-            memset(fft_input.buffer + src_size, 0, (n_fft - src_size) * sizeof(float));
+        // If the buffer wasn't assigned to source above, let's copy and pad
+        // copy from src to fft_input
+        memcpy(fft_input.buffer, src, src_size * sizeof(float));
+        // pad to the rigth with zeros
+        memset(fft_input.buffer + src_size, 0, (n_fft - src_size) * sizeof(float));
+
+        auto res = ei::fft::hw_r2c_fft(fft_input.buffer, output, n_fft);
+        if (handle_fft_hw_failure(res, n_fft)) {
+            // fallback to software
+            return software_rfft(fft_input.buffer, output, n_fft, n_fft_out_features);
         }
-
-#if EIDSP_USE_CMSIS_DSP
-        if (n_fft != 32 && n_fft != 64 && n_fft != 128 && n_fft != 256 &&
-            n_fft != 512 && n_fft != 1024 && n_fft != 2048 && n_fft != 4096) {
-            int ret = software_rfft(fft_input.buffer, output, n_fft, n_fft_out_features);
-            if (ret != EIDSP_OK) {
-                EIDSP_ERR(ret);
-            }
-        }
-        else {
-            // hardware acceleration only works for the powers above...
-            arm_rfft_fast_instance_f32 rfft_instance;
-            int status = cmsis_rfft_init_f32(&rfft_instance, n_fft);
-            if (status != ARM_MATH_SUCCESS) {
-                return status;
-            }
-
-            EI_DSP_MATRIX(fft_output, 1, n_fft);
-            if (!fft_output.buffer) {
-                EIDSP_ERR(EIDSP_OUT_OF_MEM);
-            }
-
-            arm_rfft_fast_f32(&rfft_instance, fft_input.buffer, fft_output.buffer, 0);
-
-            output[0].r = fft_output.buffer[0];
-            output[0].i = 0.0f;
-            output[n_fft_out_features - 1].r = fft_output.buffer[1];
-            output[n_fft_out_features - 1].i = 0.0f;
-
-            size_t fft_output_buffer_ix = 2;
-            for (size_t ix = 1; ix < n_fft_out_features - 1; ix += 1) {
-                output[ix].r = fft_output.buffer[fft_output_buffer_ix];
-                output[ix].i = fft_output.buffer[fft_output_buffer_ix + 1];
-
-                fft_output_buffer_ix += 2;
-            }
-        }
-#else
-        int ret = software_rfft(fft_input.buffer, output, n_fft, n_fft_out_features);
-        if (ret != EIDSP_OK) {
-            EIDSP_ERR(ret);
-        }
-#endif
 
         return EIDSP_OK;
     }
@@ -1436,94 +1452,30 @@ public:
     }
 
     /**
-     * Convert an int32_t buffer into a float buffer, maps to -1..1
-     * @param input
-     * @param output
-     * @param length
-     * @returns 0 if OK
-     */
-    static int int32_to_float(const EIDSP_i32 *input, float *output, size_t length) {
-#if EIDSP_USE_CMSIS_DSP
-        arm_q31_to_float((q31_t *)input, output, length);
-#else
-        for (size_t ix = 0; ix < length; ix++) {
-            output[ix] = (float)(input[ix]) / 2147483648.f;
-        }
-#endif
-        return EIDSP_OK;
-    }
-
-    /**
-     * Convert an float buffer into a fixedpoint 32 bit buffer, input values are
-     * limited between -1 and 1
-     * @param input
-     * @param output
-     * @param length
-     * @returns 0 if OK
-     */
-    static int float_to_int32(const float *input, EIDSP_i32 *output, size_t length) {
-#if EIDSP_USE_CMSIS_DSP
-        arm_float_to_q31((float *)input, (q31_t *)output, length);
-#else
-        for (size_t ix = 0; ix < length; ix++) {
-            output[ix] = (EIDSP_i32)saturate((int64_t)(input[ix] * 2147483648.f), 32);
-        }
-#endif
-        return EIDSP_OK;
-    }
-
-    /**
-     * Convert an int16_t buffer into a float buffer, maps to -1..1
+     * Convert an int16_t buffer into a float buffer
      * @param input
      * @param output
      * @param length
      * @returns 0 if OK
      */
     static int int16_to_float(const EIDSP_i16 *input, float *output, size_t length) {
-#if EIDSP_USE_CMSIS_DSP
-        arm_q15_to_float((q15_t *)input, output, length);
-#else
         for (size_t ix = 0; ix < length; ix++) {
-            output[ix] = (float)(input[ix]) / 32768.f;
+            output[ix] = static_cast<float>((input[ix]));
         }
-#endif
         return EIDSP_OK;
     }
 
     /**
-     * Convert an float buffer into a fixedpoint 16 bit buffer, input values are
-     * limited between -1 and 1
-     * @param input
-     * @param output
-     * @param length
-     * @returns 0 if OK
-     */
-    static int float_to_int16(const float *input, EIDSP_i16 *output, size_t length) {
-#if EIDSP_USE_CMSIS_DSP
-        arm_float_to_q15((float *)input, output, length);
-#else
-        for (size_t ix = 0; ix < length; ix++) {
-            output[ix] = (EIDSP_i16)saturate((int32_t)(input[ix] * 32768.f), 16);
-        }
-#endif
-        return EIDSP_OK;
-    }
-
-    /**
-     * Convert an int8_t buffer into a float buffer, maps to -1..1
+     * Convert an int8_t buffer into a float buffer
      * @param input
      * @param output
      * @param length
      * @returns 0 if OK
      */
     static int int8_to_float(const EIDSP_i8 *input, float *output, size_t length) {
-#if EIDSP_USE_CMSIS_DSP
-        arm_q7_to_float((q7_t *)input, output, length);
-#else
         for (size_t ix = 0; ix < length; ix++) {
-            output[ix] = (float)(input[ix]) / 128;
+            output[ix] = static_cast<float>((input[ix]));
         }
-#endif
         return EIDSP_OK;
     }
 
@@ -1559,8 +1511,35 @@ public:
     /**
      * > 50% faster then the math.h log() function
      * in return for a small loss in accuracy (0.00001 average diff with log())
-     * From: https://stackoverflow.com/questions/39821367/very-fast-approximate-logarithm-natural-log-function-in-c/39822314#39822314
-     * Licensed under the CC BY-SA 3.0
+     * Based on https://forums.developer.nvidia.com/t/faster-and-more-accurate-implementation-of-logf/40632
+     * Licensed under the 2-clause BSD license
+     *
+     *   Copyright (c) 2015-2023, Norbert Juffa
+     *   All rights reserved.
+     *
+     *   Redistribution and use in source and binary forms, with or without
+     *   modification, are permitted provided that the following conditions
+     *   are met:
+     *
+     *   1. Redistributions of source code must retain the above copyright
+     *       notice, this list of conditions and the following disclaimer.
+     *
+     *   2. Redistributions in binary form must reproduce the above copyright
+     *       notice, this list of conditions and the following disclaimer in the
+     *       documentation and/or other materials provided with the distribution.
+     *
+     *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+     *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+     *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+     *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+     *   HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+     *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+     *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+     *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+     *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+     *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+     *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+     *
      * @param a Input number
      * @returns Natural log value of a
      */
@@ -1583,6 +1562,7 @@ public:
 
         return r;
     }
+    /* End of 2-clause BSD licensed code */
 
     /**
      * Fast log10 and log2 functions, significantly faster than the ones from math.h (~6x for log10 on M4F)
@@ -1755,39 +1735,9 @@ public:
         return EIDSP_OK;
     }
 
-    static int software_rfft(float *fft_input, float *output, size_t n_fft, size_t n_fft_out_features) {
-        kiss_fft_cpx *fft_output = (kiss_fft_cpx*)ei_dsp_malloc(n_fft_out_features * sizeof(kiss_fft_cpx));
-        if (!fft_output) {
-            EIDSP_ERR(EIDSP_OUT_OF_MEM);
-        }
-
-        size_t kiss_fftr_mem_length;
-
-        // create fftr context
-        kiss_fftr_cfg cfg = kiss_fftr_alloc(n_fft, 0, NULL, NULL, &kiss_fftr_mem_length);
-        if (!cfg) {
-            ei_dsp_free(fft_output, n_fft_out_features * sizeof(kiss_fft_cpx));
-            EIDSP_ERR(EIDSP_OUT_OF_MEM);
-        }
-
-        ei_dsp_register_alloc(kiss_fftr_mem_length, cfg);
-
-        // execute the rfft operation
-        kiss_fftr(cfg, fft_input, fft_output);
-
-        // and write back to the output
-        for (size_t ix = 0; ix < n_fft_out_features; ix++) {
-            output[ix] = sqrt(pow(fft_output[ix].r, 2) + pow(fft_output[ix].i, 2));
-        }
-
-        ei_dsp_free(cfg, kiss_fftr_mem_length);
-        ei_dsp_free(fft_output, n_fft_out_features * sizeof(kiss_fft_cpx));
-
-        return EIDSP_OK;
-    }
-
     static int software_rfft(float *fft_input, fft_complex_t *output, size_t n_fft, size_t n_fft_out_features)
     {
+    #if EIDSP_INCLUDE_KISSFFT || !defined(EIDSP_INCLUDE_KISSFFT)
         // create fftr context
         size_t kiss_fftr_mem_length;
 
@@ -1804,17 +1754,14 @@ public:
         ei_dsp_free(cfg, kiss_fftr_mem_length);
 
         return EIDSP_OK;
+    #else
+        return EIDSP_NOT_SUPPORTED;
+    #endif
     }
 
     static int signal_get_data(const float *in_buffer, size_t offset, size_t length, float *out_ptr)
     {
         memcpy(out_ptr, in_buffer + offset, length * sizeof(float));
-        return 0;
-    }
-
-    static int signal_get_data_i16(int16_t *in_buffer, size_t offset, size_t length, int16_t *out_ptr)
-    {
-        memcpy(out_ptr, in_buffer + offset, length * sizeof(int16_t));
         return 0;
     }
 
@@ -1916,7 +1863,7 @@ public:
         /* Create transposed matrix */
         arm_transposed_matrix.numRows = input_matrix->cols;
         arm_transposed_matrix.numCols = input_matrix->rows;
-        arm_transposed_matrix.pData = (float *)ei_calloc(input_matrix->cols * input_matrix->rows * sizeof(float), 1);
+        auto alloc = EI_MAKE_TRACKED_POINTER(arm_transposed_matrix.pData, input_matrix->cols * input_matrix->rows);
 
         if (arm_transposed_matrix.pData == NULL) {
             EIDSP_ERR(EIDSP_OUT_OF_MEM);
@@ -1937,8 +1884,6 @@ public:
 
             output_matrix->buffer[row] = std;
         }
-
-        ei_free(arm_transposed_matrix.pData);
 
         return EIDSP_OK;
     }
@@ -2082,224 +2027,6 @@ public:
       return count;
     }
 
-    static void sqrt_q15(int16_t in, int16_t *pOut)
-    {
-        int32_t bits_val1;
-        int16_t number, temp1, var1, signBits1, half;
-        float temp_float1;
-        union {
-            int32_t fracval;
-            float floatval;
-        } tempconv;
-
-        number = in;
-
-        /* If the input is a positive number then compute the signBits. */
-        if (number > 0) {
-            signBits1 = count_leading_zeros(number) - 17;
-
-            /* Shift by the number of signBits1 */
-            if ((signBits1 % 2) == 0) {
-                number = number << signBits1;
-            } else {
-                number = number << (signBits1 - 1);
-            }
-
-            /* Calculate half value of the number */
-            half = number >> 1;
-            /* Store the number for later use */
-            temp1 = number;
-
-            /* Convert to float */
-            temp_float1 = number * 3.051757812500000e-005f;
-            /* Store as integer */
-            tempconv.floatval = temp_float1;
-            bits_val1 = tempconv.fracval;
-            /* Subtract the shifted value from the magic number to give intial guess */
-            bits_val1 = 0x5f3759df - (bits_val1 >> 1); /* gives initial guess */
-            /* Store as float */
-            tempconv.fracval = bits_val1;
-            temp_float1 = tempconv.floatval;
-            /* Convert to integer format */
-            var1 = (int32_t)(temp_float1 * 16384);
-
-            /* 1st iteration */
-            var1 =
-                ((int16_t)(
-                    (int32_t)var1 *
-                        (0x3000 -
-                         ((int16_t)((((int16_t)(((int32_t)var1 * var1) >> 15)) * (int32_t)half) >> 15))) >>
-                    15))
-                << 2;
-            /* 2nd iteration */
-            var1 =
-                ((int16_t)(
-                    (int32_t)var1 *
-                        (0x3000 -
-                         ((int16_t)((((int16_t)(((int32_t)var1 * var1) >> 15)) * (int32_t)half) >> 15))) >>
-                    15))
-                << 2;
-            /* 3rd iteration */
-            var1 =
-                ((int16_t)(
-                    (int32_t)var1 *
-                        (0x3000 -
-                         ((int16_t)((((int16_t)(((int32_t)var1 * var1) >> 15)) * (int32_t)half) >> 15))) >>
-                    15))
-                << 2;
-
-            /* Multiply the inverse square root with the original value */
-            var1 = ((int16_t)(((int32_t)temp1 * var1) >> 15)) << 1;
-
-            /* Shift the output down accordingly */
-            if ((signBits1 % 2) == 0) {
-                var1 = var1 >> (signBits1 / 2);
-            } else {
-                var1 = var1 >> ((signBits1 - 1) / 2);
-            }
-            *pOut = var1;
-        }
-        /* If the number is a negative number then store zero as its square root value */
-        else {
-            *pOut = 0;
-        }
-    }
-
-#if EIDSP_USE_CMSIS_DSP
-    /**
-     * Initialize a CMSIS-DSP fast rfft structure
-     * We do it this way as this means we can compile out fast_init calls which hints the compiler
-     * to which tables can be removed
-     */
-    static int cmsis_rfft_init_f32(arm_rfft_fast_instance_f32 *rfft_instance, const size_t n_fft)
-    {
-// ARM cores (ex M55) with Helium extensions (MVEF) need special treatment (Issue 2843)
-#if EI_CLASSIFIER_HAS_FFT_INFO == 1 && !defined(ARM_MATH_MVEF)
-        arm_status status;
-        switch (n_fft) {
-#if EI_CLASSIFIER_LOAD_FFT_32 == 1
-            case 32: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 16U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len16.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len16.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len16.pTwiddle;
-                rfft_instance->fftLenRFFT = 32U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_32;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_64 == 1
-            case 64: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 32U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len32.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len32.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len32.pTwiddle;
-                rfft_instance->fftLenRFFT = 64U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_64;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_128 == 1
-            case 128: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 64U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len64.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len64.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len64.pTwiddle;
-                rfft_instance->fftLenRFFT = 128U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_128;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_256 == 1
-            case 256: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 128U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len128.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len128.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len128.pTwiddle;
-                rfft_instance->fftLenRFFT = 256U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_256;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_512 == 1
-            case 512: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 256U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len256.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len256.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len256.pTwiddle;
-                rfft_instance->fftLenRFFT = 512U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_512;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_1024 == 1
-            case 1024: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 512U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len512.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len512.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len512.pTwiddle;
-                rfft_instance->fftLenRFFT = 1024U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_1024;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_2048 == 1
-            case 2048: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 1024U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len1024.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len1024.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len1024.pTwiddle;
-                rfft_instance->fftLenRFFT = 2048U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_2048;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-#if EI_CLASSIFIER_LOAD_FFT_4096 == 1
-            case 4096: {
-                arm_cfft_instance_f32 *S = &(rfft_instance->Sint);
-                S->fftLen = 2048U;
-                S->pTwiddle = NULL;
-                S->bitRevLength = arm_cfft_sR_f32_len2048.bitRevLength;
-                S->pBitRevTable = arm_cfft_sR_f32_len2048.pBitRevTable;
-                S->pTwiddle = arm_cfft_sR_f32_len2048.pTwiddle;
-                rfft_instance->fftLenRFFT = 4096U;
-                rfft_instance->pTwiddleRFFT = (float32_t *) twiddleCoef_rfft_4096;
-                status = ARM_MATH_SUCCESS;
-                break;
-            }
-#endif
-            default:
-                return EIDSP_FFT_TABLE_NOT_LOADED;
-        }
-
-        return status;
-#else
-        return arm_rfft_fast_init_f32(rfft_instance, n_fft);
-#endif
-    }
-#endif // #if EIDSP_USE_CMSIS_DSP
-
     /**
      * Power spectrum of a frame
      * @param frame Row of a frame
@@ -2347,9 +2074,10 @@ public:
         bool do_saved_point = false;
         size_t fft_out_size = fft_points / 2 + 1;
         float *fft_out;
-        ei_unique_ptr_t p_fft_out(nullptr, ei_free);
+        const size_t size = fft_out_size * sizeof(float);
+        ei_unique_ptr_t p_fft_out(nullptr, [size](void* ptr){ei::ei_dsp_free_func(ptr, size);});
         if (input_size < fft_points) {
-            fft_out = (float *)ei_calloc(fft_out_size, sizeof(float));
+            fft_out = (float *)ei_dsp_calloc(fft_out_size, sizeof(float));
             p_fft_out.reset(fft_out);
         }
         else {
@@ -2443,8 +2171,376 @@ public:
     {
         zero_handling(input->buffer, input->rows * input->cols);
     }
+
+    /**
+     * This function handle the underflow float values.
+     * @param input Array
+     * @param input_size Size of array
+     * @param epsilon Smallest valid non-zero value
+     * @returns void
+     */
+    static void underflow_handling(float* input, size_t input_size, float epsilon = 1e-07f)
+    {
+        for (size_t ix = 0; ix < input_size; ix++) {
+            if (fabs(input[ix]) < epsilon) {
+                input[ix] = 0.0f;
+            }
+        }
+    }
+
+    __attribute__((unused)) static void scale(fvec& v, float scale) {
+        for (auto& x : v) {
+            x *= scale;
+        }
+    }
+
+    __attribute__((unused)) static void sub(fvec& v, float b) {
+        for (auto& x : v) {
+            x -= b;
+        }
+    }
+
+    __attribute__((unused)) static void mul(float* y, const float* x, float* b, size_t n) {
+        for (size_t i = 0; i < n; i++) {
+            y[i] = x[i] * b[i];
+        }
+    }
+
+    __attribute__((unused)) static fvec diff(const float* v, size_t n) {
+        fvec d(n - 1);
+        for (size_t i = 0; i < d.size(); i++) {
+            d[i] = v[i + 1] - v[i];
+        }
+        return d;
+    }
+
+    __attribute__((unused)) static float sum(const float* v, size_t n) {
+        float sum = 0;
+        for (size_t i = 0; i < n; i++) {
+            sum += v[i];
+        }
+        return sum;
+    }
+
+    static float mean(const fvec& v) {
+        float mean = 0;
+        for (auto x : v) {
+            mean += x;
+        }
+        mean /= v.size();
+        return mean;
+    }
+
+    static float mean(const float* v, size_t n) {
+        float mean = 0;
+        for (size_t i = 0; i < n; i++) {
+            mean += v[i];
+        }
+        mean /= n;
+        return mean;
+    }
+
+    static float median(const float* v, size_t n) {
+        fvec vc(n);
+        std::copy(v, v + n, vc.begin());
+        std::sort(vc.begin(), vc.end());
+        if (vc.size() % 2 == 0) {
+            return (vc[vc.size() / 2 - 1] + vc[vc.size() / 2]) / 2;
+        }
+        return vc[vc.size() / 2];
+    }
+
+    __attribute__((unused)) static float median(const fvec& v) {
+        return median(v.data(), v.size());
+    }
+
+    static float stddev(const float* v, size_t n, float m /* mean */, int ddof = 0) {
+        float var = 0;
+        for (size_t i = 0; i < n; i++) {
+            var += (v[i] - m) * (v[i] - m);
+        }
+        var /= n - ddof;
+        return sqrt(var);
+    }
+
+    __attribute__((unused)) static float stddev(const float* v, size_t n) {
+        return stddev(v, n, mean(v, n), 0);
+    }
+
+    __attribute__((unused)) static float stddev(const float* v, size_t n, int ddof) {
+        return stddev(v, n, mean(v, n), ddof);
+    }
+
+    __attribute__((unused)) static float stddev(const fvec& v, int ddof = 0) {
+        return stddev(v.data(), v.size(), mean(v), ddof);
+    }
+
+    static float rms(const float* v, size_t n) {
+        float rms = 0;
+        for (size_t i = 0; i < n; i++) {
+            rms += v[i] * v[i];
+        }
+        rms /= n;
+        return sqrt(rms);
+    }
+
+    __attribute__((unused)) static float rms(const fvec& v) {
+        return rms(v.data(), v.size());
+    }
+
+    template <typename T>
+    static float max(const ei_vector<T>& v) {
+        return *std::max_element(v.begin(), v.end());
+    }
+
+    __attribute__((unused)) static float max(const float* v, size_t n) {
+        return *std::max_element(v, v + n);
+    }
+
+    template <typename T>
+    static float min(const ei_vector<T>& v) {
+        return *std::min_element(v.begin(), v.end());
+    }
+
+    __attribute__((unused)) static float min(const float* v, size_t n) {
+        return *std::min_element(v, v + n);
+    }
+
+    __attribute__((unused)) static int argmax(const fvec& v, int start, int end) {
+        return std::max_element(v.begin() + start, v.begin() + end) - v.begin();
+    }
+
+    __attribute__((unused)) static fvec divide(float num, const float* den, size_t n) {
+        fvec v(n);
+        for (size_t i = 0; i < n; i++) {
+            v[i] = num / den[i];
+        }
+        return v;
+    }
+
+    __attribute__((unused)) static ivec histogram(const float* x, size_t n, int a, int b, int inc) {
+        int num_bins = (b - a) / inc;
+        ivec bins(num_bins, 0);
+        for (size_t i = 0; i < n; i++) {
+            int bin = (int)((x[i] - a) / inc);
+            if (bin >= 0 && bin < num_bins) {
+                bins[bin]++;
+            }
+        }
+        return bins;
+    }
+
+    __attribute__((unused)) static fvec cumsum(const float* v, size_t n) {
+        fvec c(n);
+        c[0] = v[0];
+        for (size_t i = 1; i < n; i++) {
+            c[i] = c[i - 1] + v[i];
+        }
+        return c;
+    }
+
+    __attribute__((unused)) static fvec arange(float start, float end, float step) {
+        assert(start < end);
+        assert(step > 0);
+        fvec v(::round((end - start) / step));
+        for (size_t i = 0; i < v.size(); i++) {
+            v[i] = start + i * step;
+        }
+        return v;
+    }
+
+    __attribute__((unused)) static void add(fvec& v, fvec& b) {
+        for (size_t i = 0; i < v.size(); i++) {
+            v[i] += b[i];
+        }
+    }
+
+    __attribute__((unused)) static float trapz(const fvec& x, const fvec& y, size_t lo, size_t hi) {
+        float area = 0;
+        for (size_t i = lo; i < hi; i++) {
+            area += (x[i + 1] - x[i]) * (y[i + 1] + y[i]) / 2;
+        }
+        return area;
+    }
+
+    __attribute__((unused)) static fvec quantile(const fvec& v, size_t start, size_t end, const fvec& q) {
+        end = std::min(end, v.size());
+        fvec vc(end - start);
+        std::copy(v.begin() + start, v.begin() + end, vc.begin());
+        std::sort(vc.begin(), vc.end());
+        fvec res(q.size());
+        for (size_t i = 0; i < q.size(); i++) {
+            res[i] = vc[q[i] * vc.size()];
+        }
+        return res;
+    }
+
+    __attribute__((unused)) static fvec quantile(const float* v, size_t n, const fvec& q) {
+        fvec vc(n);
+        std::copy(v, v + n, vc.begin());
+        std::sort(vc.begin(), vc.end());
+        fvec res(q.size());
+        for (size_t i = 0; i < q.size(); i++) {
+            res[i] = vc[q[i] * vc.size()];
+        }
+        return res;
+    }
+
+    static float dot(const float* x, const float* y, size_t n) {
+        float res = 0;
+        for (size_t i = 0; i < n; i++) {
+            res += x[i] * y[i];
+        }
+        return res;
+    }
+
+
+    __attribute__((unused)) static float cosine_similarity(const fvec& x, const fvec& y) {
+        float xy = dot(x.data(), y.data(), x.size());
+        float magx = dot(x.data(), x.data(), x.size());
+        float magy = dot(y.data(), y.data(), y.size());
+        xy /= sqrt(magx * magy);
+        return xy;
+    }
+
+    __attribute__((unused)) static void ln(fvec& v) {
+        for (auto& x : v) {
+            x = log(x);
+        }
+    }
+
+    static size_t next_power_of_2(size_t x) {
+        size_t res = 1;
+        while (res < x) {
+            res *= 2;
+        }
+        return res;
+    }
+
+    static void detrend(float* data, size_t n) {
+        // Calculate the mean of the data points
+        float mean = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            mean += data[i];
+        }
+        mean /= n;
+
+        // Calculate the slope of the best-fit line
+        float x_mean = (n + 1) / 2.0;
+        float y_mean = mean;
+        float numerator = 0.0;
+        float denominator = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            numerator += (i + 1 - x_mean) * (data[i] - y_mean);
+            denominator += (i + 1 - x_mean) * (i + 1 - x_mean);
+        }
+        float slope = numerator / denominator;
+
+        // Subtract the best-fit line from the data points to get the detrended data
+        for (size_t i = 0; i < n; i++) {
+            data[i] = data[i] - (slope * (i + 1));
+        }
+
+        // Calculate the mean of the detrended data
+        float detrended_mean = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            detrended_mean += data[i];
+        }
+        detrended_mean /= n;
+
+        // Subtract the mean of the detrended data from each element
+        for (size_t i = 0; i < n; i++) {
+            data[i] -= detrended_mean;
+        }
+    }
+
+    static fvec detrend(const fvec& data) {
+        auto ret = data;
+        detrend(ret.data(), ret.size());
+        return ret;
+    }
+
+private:
+    /**
+     * Helper function to handle FFT hardware acceleration failures and logging
+     * @param res Result code from hardware FFT attempt
+     * @param n_fft FFT size that was attempted
+     * @returns true if should fallback to software FFT
+     */
+    static bool handle_fft_hw_failure(int res, size_t n_fft) {
+        static bool first_time = true;
+        if (res == EIDSP_OK) {
+            return false;
+        }
+
+        // don't warn if we didn't include a DSP library
+        if (res != EIDSP_NO_HW_ACCEL && first_time) {
+            first_time = false; // only warn once
+            if (res == EIDSP_FFT_SIZE_NOT_SUPPORTED) {
+                EI_LOGI("HW RFFT failed, FFT size not supported. Must be a power of 2 between %d and %d, (size was %d)",
+                    ei::fft::MIN_FFT_SIZE, ei::fft::MAX_FFT_SIZE, (int)n_fft);
+            }
+            else {
+                EI_LOGI("HW RFFT failed, falling back to SW");
+            }
+        }
+        return true;
+    }
+
 };
 
+struct fmat {
+    ei_matrix* mat = nullptr;
+    fmat(size_t rows, size_t cols) {
+        mat = new ei_matrix(rows, cols);
+        assert(mat);
+    }
+
+    ~fmat() {
+        delete mat;
+    }
+
+    void resize(size_t rows, size_t cols) {
+        delete mat;
+        mat = new ei_matrix(rows, cols);
+    }
+
+    float* operator[](size_t i) {
+        if (mat == nullptr || i >= mat->rows) {
+            return nullptr;
+        }
+        return mat->get_row_ptr(i);
+    }
+
+    void fill(float x) {
+        if (mat == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < mat->rows; i++) {
+            for (size_t j = 0; j < mat->cols; j++) {
+                (*this)[i][j] = x;
+            }
+        }
+    }
+
+    void fill_col(size_t col, float x) {
+        if (mat == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < mat->rows; i++) {
+            (*this)[i][col] = x;
+        }
+    }
+
+    void fill_row(size_t row, float x) {
+        if (mat == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < mat->cols; i++) {
+            (*this)[row][i] = x;
+        }
+    }
+};
 } // namespace ei
 
 #endif // _EIDSP_NUMPY_H_

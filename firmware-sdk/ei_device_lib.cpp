@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "at_base64_lib.h"
@@ -38,7 +55,7 @@ extern char* ei_classifier_inferencing_categories[];
  *
  * @return     true if user requested stop
  */
-extern bool ei_user_invoke_stop_lib(void)
+__attribute__((weak)) bool ei_user_invoke_stop_lib(void)
 {
     char ch;
     while(1) {
@@ -100,6 +117,11 @@ bool run_impulse_static_data(bool debug, size_t length, size_t buf_len)
     static float *data_pt = NULL;
     static uint8_t *temp_buf = NULL;
 
+    if(buf_len < 6) {
+        ei_printf("ERR: Minimum buffer length should be 6\r\n");
+        return false;
+    }
+
     data_pt = (float*)ei_malloc(length*sizeof(float));
     if (data_pt == NULL) {
         ei_printf("ERR: Memory allocation for data buffer failed\r\n");
@@ -114,7 +136,7 @@ bool run_impulse_static_data(bool debug, size_t length, size_t buf_len)
         return false;
     }
 
-    ei_printf("OK CHUNK=%d\r\n", buf_len);
+    ei_printf("OK CHUNK=%d\r\n", (int)buf_len);
 
     while (cur_pos < length) {
 
@@ -136,14 +158,19 @@ bool run_impulse_static_data(bool debug, size_t length, size_t buf_len)
         }
 
         std::vector<unsigned char> decoded = base64_decode((const char*)temp_buf);
-        memcpy((void*)(data_pt + cur_pos), decoded.data(), decoded.size());
 
-        cur_pos = cur_pos + decoded.size()/sizeof(float);
+        int copylength = decoded.size() > (length - cur_pos) * sizeof(float)
+                       ? (length - cur_pos) * sizeof(float)
+                       : decoded.size();
+
+        memcpy((void*)(data_pt + cur_pos), decoded.data(), copylength);
+
+        cur_pos = cur_pos + copylength/sizeof(float);
         buf_pos = 0;
-        ei_printf("OK %d \r\n", cur_pos);
+        ei_printf("OK %d \r\n", (int)cur_pos);
     }
 
-    ei_printf("TRANSFER COMPLETED %d\r\n", cur_pos);
+    ei_printf("TRANSFER COMPLETED %d\r\n", (int)cur_pos);
     uint32_t res = (uint32_t)ei_start_impulse_static_data(debug, data_pt, cur_pos);
     cur_pos = 0;
     ei_free(data_pt);
@@ -167,7 +194,7 @@ EI_IMPULSE_ERROR ei_start_impulse_static_data(bool debug, float* data, size_t si
     features = data;
 
     signal_t signal;            // Wrapper for raw input buffer
-    ei_impulse_result_t result; // Used to store inference output
+    ei_impulse_result_t result = {0}; // Used to store inference output
     EI_IMPULSE_ERROR res;       // Return code from inference
 
     // Make sure that the length of the buffer matches expected input length
@@ -187,10 +214,18 @@ EI_IMPULSE_ERROR ei_start_impulse_static_data(bool debug, float* data, size_t si
     res = run_classifier(&signal, &result, debug);
 
     // Print return code and how long it took to perform inference
-    ei_printf("Timing: DSP %d ms, inference %d ms, anomaly %d ms\r\n",
-            result.timing.dsp,
-            result.timing.classification,
-            result.timing.anomaly);
+    if(result.timing.dsp_us != 0) {
+        ei_printf("Timing: DSP %.3f ms, inference %.3f ms, anomaly %.3f ms\r\n",
+                result.timing.dsp_us / 1000.f,
+                result.timing.classification_us / 1000.f,
+                result.timing.anomaly_us / 1000.f);
+    }
+    else {
+        ei_printf("Timing: DSP %d ms, inference %d ms, anomaly %d ms\r\n",
+                result.timing.dsp,
+                result.timing.classification,
+                result.timing.anomaly);
+    }
 
     // Print the prediction results (object detection)
 #if EI_CLASSIFIER_OBJECT_DETECTION == 1
@@ -214,13 +249,16 @@ EI_IMPULSE_ERROR ei_start_impulse_static_data(bool debug, float* data, size_t si
     ei_printf("Predictions:\r\n");
     for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
         ei_printf("  %s: ", ei_classifier_inferencing_categories[i]);
-        ei_printf("%.5f\r\n", result.classification[i].value);
+        ei_printf_float(result.classification[i].value);
+        ei_printf("\r\n");
     }
 #endif
 
     // Print anomaly result (if it exists)
 #if EI_CLASSIFIER_HAS_ANOMALY == 1
-    ei_printf("Anomaly prediction: %.3f\r\n", result.anomaly);
+    ei_printf("Anomaly prediction: ");
+    ei_printf_float(result.anomaly);
+    ei_printf("\r\n");
 #endif
     return res;
 }

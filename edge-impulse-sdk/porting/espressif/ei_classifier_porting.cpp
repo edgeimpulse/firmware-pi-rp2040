@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "../ei_classifier_porting.h"
@@ -21,12 +38,17 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <cstring>
 // Include FreeRTOS for delay
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 // for millis and micros
 #include "esp_timer.h"
+#include "esp_idf_version.h"
+
+// memory handling
+#include "esp_heap_caps.h"
 
 #define EI_WEAK_FN __attribute__((weak))
 
@@ -73,11 +95,33 @@ __attribute__((weak)) void ei_printf_float(float f) {
     ei_printf("%f", f);
 }
 
+// we use alligned alloc instead of regular malloc
+// due to https://github.com/espressif/esp-nn/issues/7
 __attribute__((weak)) void *ei_malloc(size_t size) {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 1)
+    return heap_caps_aligned_alloc(16, size, MALLOC_CAP_DEFAULT);
+#else
+    return aligned_alloc(16, size);
+#endif
+#endif
     return malloc(size);
 }
 
 __attribute__((weak)) void *ei_calloc(size_t nitems, size_t size) {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 1)
+    return heap_caps_calloc(nitems, size, MALLOC_CAP_DEFAULT);
+#else
+    void *p;
+    p = aligned_alloc(16, nitems * size);
+    if (p == nullptr)
+        return p;
+
+    memset(p, '\0', nitems * size);
+    return p;
+#endif
+#endif
     return calloc(nitems, size);
 }
 

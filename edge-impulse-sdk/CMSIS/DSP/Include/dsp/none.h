@@ -33,7 +33,7 @@ But those are not always available or use a restricted set
 of intrinsics.
 
 */
- 
+
 #ifndef _NONE_H_
 #define _NONE_H_
 
@@ -44,7 +44,7 @@ extern "C"
 {
 #endif
 
- 
+
 
 /*
 
@@ -59,7 +59,7 @@ MSVC is not going to be used to cross-compile to ARM. So, having a MSVC
 compiler file in Core or Core_A would not make sense.
 
 */
-#if defined ( _MSC_VER ) || defined(__GNUC_PYTHON__)
+#if defined ( _MSC_VER ) || defined(__GNUC_PYTHON__) || defined(__APPLE_CC__)
     __STATIC_FORCEINLINE uint8_t __CLZ(uint32_t data)
     {
       if (data == 0U) { return 32U; }
@@ -205,8 +205,7 @@ __STATIC_FORCEINLINE uint32_t __ROR(uint32_t op1, uint32_t op2)
 #define mult_32x32_keep32(a, x, y) \
     a = (q31_t) (((q63_t) x * y ) >> 32)
 
-// Patched by Edge Impulse, don't redefine these macros on Arm cores
-#if defined ( _MSC_VER ) || defined(__GNUC_PYTHON__)
+#if !defined (ARM_MATH_DSP) || defined ( _MSC_VER ) || defined(__GNUC_PYTHON__)
   /**
    * @brief definition to pack two 16 bit values.
    */
@@ -215,6 +214,7 @@ __STATIC_FORCEINLINE uint32_t __ROR(uint32_t op1, uint32_t op2)
   #define __PKHTB(ARG1, ARG2, ARG3) ( (((int32_t)(ARG1) <<    0) & (int32_t)0xFFFF0000) | \
                                       (((int32_t)(ARG2) >> ARG3) & (int32_t)0x0000FFFF)  )
 
+  #define __SXTAB16_RORn(ARG1, ARG2, ARG3) __SXTAB16(ARG1, __ROR(ARG2, ARG3))
 
   /*
    * @brief C custom defined SADD16 (by Edge Impulse)
@@ -230,7 +230,6 @@ __STATIC_FORCEINLINE uint32_t __ROR(uint32_t op1, uint32_t op2)
 
     return ((uint32_t)((s << 16) | (r      )));
   }
-// Patched by Edge Impulse, don't redefine these macros on Arm cores
 #endif
 
    /**
@@ -249,7 +248,7 @@ __STATIC_FORCEINLINE uint32_t __ROR(uint32_t op1, uint32_t op2)
 #endif
 
 
- 
+
 
 // Patched by Edge Impulse, remove `!defined (ARM_MATH_DSP)` check
 /*
@@ -584,10 +583,11 @@ __STATIC_FORCEINLINE uint32_t __ROR(uint32_t op1, uint32_t op2)
   {
     return (sum + (int32_t) (((int64_t) x * y) >> 32));
   }
-
+#if defined ( _MSC_VER ) || defined(__GNUC_PYTHON__) || defined(__APPLE_CC__)
   // Rotate right, dual extract 8-bits and sign extend each to 16-bits.
   // rotate value must be 8,16 or 24
   // Patched by Edge Impulse to polyfill x86 support
+  // Patched by Edge Impulse for IAR Workbench
   __STATIC_FORCEINLINE uint32_t __SXTB16_RORn(uint32_t val1, uint32_t rotate)
   {
     uint32_t ret;
@@ -601,7 +601,7 @@ __STATIC_FORCEINLINE uint32_t __ROR(uint32_t op1, uint32_t op2)
     ret |= ((uint32_t)a16 & 0xffff);
     return ret;
   }
-
+#endif
   // Dual sign-extended 8 to 16-bit addition
   // Patched by Edge Impulse to polyfill x86 support
   __STATIC_FORCEINLINE uint32_t __SXTAB16(uint32_t val1, uint32_t val2)

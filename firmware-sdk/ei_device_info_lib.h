@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef EI_DEVICE_INFO_LIB
@@ -23,6 +40,7 @@
 #include "ei_config_types.h"
 #include "ei_device_memory.h"
 #include "ei_fusion.h"
+#include "edge-impulse-sdk/porting/ei_classifier_porting.h"
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -66,12 +84,15 @@ typedef struct {
     EiWiFiSecurity wifi_security;
     float sample_interval_ms;
     uint32_t sample_length_ms;
+    char sensor_label[64];
     char sample_label[128];
     char sample_hmac_key[33];
     char upload_host[128];
     char upload_path[128];
     char upload_api_key[128];
     char mgmt_url[128];
+    uint32_t long_recording_length_ms;
+    uint32_t long_recording_interval_ms;
     uint32_t magic;
 } EiConfig;
 
@@ -97,17 +118,21 @@ protected:
     std::string management_url = "path";
 
     std::string sample_hmac_key = "please-set-me";
+    std::string sensor_label = "sensor";
     std::string sample_label = "test";
     float sample_interval_ms;
     uint32_t sample_length_ms;
 
+    uint32_t long_recording_length_ms;
+    uint32_t long_recording_interval_ms;
+
     std::string upload_host = "host";
     std::string upload_path = "path";
     std::string upload_api_key = "0123456789abcdef";
-    
+
 #if MULTI_FREQ_ENABLED == 1
     uint8_t fusioning;
-    uint32_t sample_interval;    
+    uint32_t sample_interval;
 #endif
 
     EiDeviceMemory *memory;
@@ -119,48 +144,64 @@ public:
 
     virtual bool save_config(void)
     {
-        EiConfig buf;
+        EiConfig *buf = (EiConfig *)ei_malloc(sizeof(EiConfig));
+        if(buf == NULL) {
+            return false;
+        }
 
-        memset(&buf, 0, sizeof(EiConfig));
+        memset(buf, 0, sizeof(EiConfig));
 
-        strncpy(buf.wifi_ssid, wifi_ssid.c_str(), 128);
-        strncpy(buf.wifi_password, wifi_password.c_str(), 128);
-        buf.wifi_security = wifi_security;
-        buf.sample_interval_ms = sample_interval_ms;
-        buf.sample_length_ms = sample_length_ms;
-        strncpy(buf.sample_label, sample_label.c_str(), 128);
-        strncpy(buf.sample_hmac_key, sample_hmac_key.c_str(), 33);
-        strncpy(buf.upload_host, upload_host.c_str(), 128);
-        strncpy(buf.upload_path, upload_path.c_str(), 128);
-        strncpy(buf.upload_api_key, upload_api_key.c_str(), 128);
-        strncpy(buf.mgmt_url, management_url.c_str(), 128);
-        buf.magic = 0xdeadbeef;
+        strncpy(buf->wifi_ssid, wifi_ssid.c_str(), 128);
+        strncpy(buf->wifi_password, wifi_password.c_str(), 128);
+        buf->wifi_security = wifi_security;
+        buf->sample_interval_ms = sample_interval_ms;
+        buf->sample_length_ms = sample_length_ms;
+        buf->long_recording_interval_ms = long_recording_interval_ms;
+        buf->long_recording_length_ms = long_recording_length_ms;
+        strncpy(buf->sample_label, sample_label.c_str(), 128);
+        strncpy(buf->sample_hmac_key, sample_hmac_key.c_str(), 33);
+        strncpy(buf->sensor_label, sensor_label.c_str(), 128);
+        strncpy(buf->upload_host, upload_host.c_str(), 128);
+        strncpy(buf->upload_path, upload_path.c_str(), 128);
+        strncpy(buf->upload_api_key, upload_api_key.c_str(), 128);
+        strncpy(buf->mgmt_url, management_url.c_str(), 128);
+        buf->magic = 0xdeadbeef;
 
-        memory->save_config((uint8_t *)&buf, sizeof(EiConfig));
+        bool ret = memory->save_config((uint8_t *)buf, sizeof(EiConfig));
 
-        return true;
+        ei_free((void *)buf);
+
+        return ret;
     }
 
     virtual void load_config(void)
     {
-        EiConfig buf;
-
-        memset(&buf, 0, sizeof(EiConfig));
-        memory->load_config((uint8_t *)&buf, sizeof(EiConfig));
-
-        if (buf.magic == 0xdeadbeef) {
-            wifi_ssid = std::string(buf.wifi_ssid, 128);
-            wifi_password = std::string(buf.wifi_password, 128);
-            wifi_security = buf.wifi_security;
-            sample_interval_ms = buf.sample_interval_ms;
-            sample_length_ms = buf.sample_length_ms;
-            sample_label = std::string(buf.sample_label, 128);
-            sample_hmac_key = std::string(buf.sample_hmac_key, 33);
-            upload_host = std::string(buf.upload_host, 128);
-            upload_path = std::string(buf.upload_path, 128);
-            upload_api_key = std::string(buf.upload_api_key, 128);
-            management_url = std::string(buf.mgmt_url, 128);
+        EiConfig *buf = (EiConfig *)ei_malloc(sizeof(EiConfig));
+        if(buf == NULL) {
+            return;
         }
+
+        memset(buf, 0, sizeof(EiConfig));
+        memory->load_config((uint8_t *)buf, sizeof(EiConfig));
+
+        if (buf->magic == 0xdeadbeef) {
+            wifi_ssid = std::string(buf->wifi_ssid, 128);
+            wifi_password = std::string(buf->wifi_password, 128);
+            wifi_security = buf->wifi_security;
+            sample_interval_ms = buf->sample_interval_ms;
+            sample_length_ms = buf->sample_length_ms;
+            sample_label = std::string(buf->sample_label, 128);
+            sample_hmac_key = std::string(buf->sample_hmac_key, 33);
+            upload_host = std::string(buf->upload_host, 128);
+            upload_path = std::string(buf->upload_path, 128);
+            upload_api_key = std::string(buf->upload_api_key, 128);
+            management_url = std::string(buf->mgmt_url, 128);
+            sensor_label = std::string(buf->sensor_label, 128);
+            long_recording_interval_ms = buf->long_recording_interval_ms;
+            long_recording_length_ms = buf->long_recording_length_ms;
+        }
+
+        ei_free((void *)buf);
     }
 
     /**
@@ -222,6 +263,20 @@ public:
         }
     }
 
+    virtual const std::string& get_sensor_label(void)
+    {
+        return sensor_label;
+    }
+
+    virtual void set_sensor_label(std::string label, bool save = true)
+    {
+        sensor_label = label;
+
+        if(save) {
+            save_config();
+        }
+    }
+
     virtual const std::string& get_sample_label(void)
     {
         return sample_label;
@@ -258,6 +313,34 @@ public:
     virtual void set_sample_length_ms(uint32_t length_ms, bool save = true)
     {
         sample_length_ms = length_ms;
+
+        if(save) {
+            save_config();
+        }
+    }
+
+    virtual uint32_t get_long_recording_length_ms(void)
+    {
+        return long_recording_length_ms;
+    }
+
+    virtual void set_long_recording_length_ms(uint32_t length_ms, bool save = true)
+    {
+        long_recording_length_ms = length_ms;
+
+        if(save) {
+            save_config();
+        }
+    }
+
+    virtual uint32_t get_long_recording_interval_ms(void)
+    {
+        return long_recording_interval_ms;
+    }
+
+    virtual void set_long_recording_interval_ms(uint32_t interval_ms, bool save = true)
+    {
+        long_recording_interval_ms = interval_ms;
 
         if(save) {
             save_config();
@@ -311,17 +394,41 @@ public:
         return false;
     }
 
+    virtual void set_wifi_config(std::string ssid, std::string password, EiWiFiSecurity security, bool save = true)
+    {
+        wifi_ssid = ssid;
+        wifi_password = password;
+        wifi_security = security;
+
+        if(save) {
+            save_config();
+        }
+    }
+
+    virtual void get_wifi_config(std::string& ssid, std::string& password, EiWiFiSecurity* security)
+    {
+        ssid = wifi_ssid;
+        password = wifi_password;
+        *security = wifi_security;
+    }
+
     virtual void clear_config(void)
     {
+        wifi_ssid = "";
+        wifi_password = "";
+        wifi_security = EI_SECURITY_NONE;
         device_id = "11:22:33:44:55:66";
         management_url = "";
         sample_hmac_key = "";
+        sensor_label = "";
         sample_label = "";
         sample_interval_ms = 0;
         sample_length_ms = 0;
         upload_host = "";
         upload_path = "";
         upload_api_key = "";
+        long_recording_length_ms = 0;
+        long_recording_interval_ms = 0;
 
         this->init_device_id();
     }
@@ -349,17 +456,13 @@ public:
     /**
 	 * @brief      Create resolution list for snapshot setting
 	 *             The studio and daemon require this list
-	 * @param      snapshot_list       Place pointer to resolution list
-	 * @param      snapshot_list_size  Write number of resolutions here
 	 *
-	 * @return     False if all went ok
+	 * @return     EiSnapshotProperties
 	 */
-    virtual bool get_snapshot_list(
-        const ei_device_snapshot_resolutions_t **snapshot_list,
-        size_t *snapshot_list_size,
-        const char **color_depth)
+    virtual EiSnapshotProperties get_snapshot_list()
     {
-        return true;
+        EiSnapshotProperties props;
+        return props;
     }
 
     virtual uint32_t get_data_output_baudrate(void)
@@ -389,7 +492,7 @@ public:
 	uint32_t actual_timer;
     std::vector<float> multi_sample_interval;
     void (*sample_multi_read_callback)(uint8_t);
-    
+
     virtual bool start_multi_sample_thread(void (*sample_multi_read_cb)(uint8_t), float* fusion_sample_interval_ms, uint8_t num_fusioned)
     {
         uint8_t i;
@@ -417,7 +520,7 @@ public:
         * TODO
         * start timer/thread
         */
-       
+
         return false;
     }
 
@@ -431,7 +534,7 @@ public:
         return sample_interval;
     }
 
-#endif 
+#endif
 
     virtual void set_state(EiState)
     {

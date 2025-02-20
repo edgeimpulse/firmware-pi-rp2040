@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _EI_CLASSIFIER_INFERENCING_ENGINE_TFLITE_MICRO_H_
@@ -24,9 +41,9 @@
 
 #include <cmath>
 #include "edge-impulse-sdk/tensorflow/lite/micro/all_ops_resolver.h"
-#include "edge-impulse-sdk/tensorflow/lite/micro/micro_error_reporter.h"
 #include "edge-impulse-sdk/tensorflow/lite/micro/micro_interpreter.h"
 #include "edge-impulse-sdk/tensorflow/lite/schema/schema_generated.h"
+#include "edge-impulse-sdk/tensorflow/lite/schema/schema_generated_full.h"
 #include "edge-impulse-sdk/classifier/ei_aligned_malloc.h"
 #include "edge-impulse-sdk/classifier/ei_fill_result_struct.h"
 #include "edge-impulse-sdk/classifier/ei_model_types.h"
@@ -35,9 +52,6 @@
 #if defined(EI_CLASSIFIER_HAS_TFLITE_OPS_RESOLVER) && EI_CLASSIFIER_HAS_TFLITE_OPS_RESOLVER == 1
 #include "tflite-model/tflite-resolver.h"
 #endif // EI_CLASSIFIER_HAS_TFLITE_OPS_RESOLVER
-
-static tflite::MicroErrorReporter micro_error_reporter;
-static tflite::ErrorReporter* error_reporter = &micro_error_reporter;
 
 #ifdef EI_CLASSIFIER_ALLOCATION_STATIC
 #if defined __GNUC__
@@ -76,7 +90,7 @@ static EI_IMPULSE_ERROR inference_tflite_setup(
 
 #ifdef EI_CLASSIFIER_ALLOCATION_STATIC
     // Assign a no-op lambda to the "free" function in case of static arena
-    static uint8_t tensor_arena[EI_CLASSIFIER_TFLITE_ARENA_SIZE] ALIGN(16);
+    static uint8_t tensor_arena[EI_CLASSIFIER_TFLITE_LARGEST_ARENA_SIZE] ALIGN(16);
     p_tensor_arena = ei_unique_ptr_t(tensor_arena, [](void*){});
 #else
     // Create an area of memory to use for input, output, and intermediate arrays.
@@ -108,7 +122,7 @@ static EI_IMPULSE_ERROR inference_tflite_setup(
         // copying or parsing, it's a very lightweight operation.
         model = tflite::GetModel(graph_config->model);
         if (model->version() != TFLITE_SCHEMA_VERSION) {
-            error_reporter->Report(
+            ei_printf(
                 "Model provided is schema version %d not equal "
                 "to supported version %d.",
                 model->version(), TFLITE_SCHEMA_VERSION);
@@ -120,19 +134,19 @@ static EI_IMPULSE_ERROR inference_tflite_setup(
 #ifdef EI_TFLITE_RESOLVER
     EI_TFLITE_RESOLVER
 #else
-    tflite::AllOpsResolver resolver;
+    static tflite::AllOpsResolver resolver; // needs static to match the life of the interpreter
 #endif
 
     // Build an interpreter to run the model with.
     tflite::MicroInterpreter *interpreter = new tflite::MicroInterpreter(
-        model, resolver, tensor_arena, graph_config->arena_size, error_reporter);
+        model, resolver, tensor_arena, graph_config->arena_size);
 
     *micro_interpreter = interpreter;
 
     // Allocate memory from the tensor_arena for the model's tensors.
-    TfLiteStatus allocate_status = interpreter->AllocateTensors();
+    TfLiteStatus allocate_status = interpreter->AllocateTensors(true);
     if (allocate_status != kTfLiteOk) {
-        error_reporter->Report("AllocateTensors() failed");
+        ei_printf("AllocateTensors() failed");
         return EI_IMPULSE_TFLITE_ERROR;
     }
 
@@ -166,7 +180,7 @@ static EI_IMPULSE_ERROR inference_tflite_setup(
  */
 static EI_IMPULSE_ERROR inference_tflite_run(
     const ei_impulse_t *impulse,
-    ei_learning_block_config_tflite_graph_t *config,
+    ei_learning_block_config_tflite_graph_t *block_config,
     uint64_t ctx_start_us,
     TfLiteTensor* output,
     TfLiteTensor* labels_tensor,
@@ -176,11 +190,12 @@ static EI_IMPULSE_ERROR inference_tflite_run(
     ei_impulse_result_t *result,
     bool debug) {
 
+
     // Run inference, and report any error
     TfLiteStatus invoke_status = interpreter->Invoke();
     if (invoke_status != kTfLiteOk) {
         delete interpreter;
-        error_reporter->Report("Invoke failed (%d)\n", invoke_status);
+        ei_printf("Invoke failed (%d)\n", invoke_status);
         return EI_IMPULSE_TFLITE_ERROR;
     }
 
@@ -195,7 +210,7 @@ static EI_IMPULSE_ERROR inference_tflite_run(
     }
 
     EI_IMPULSE_ERROR fill_res = fill_result_struct_from_output_tensor_tflite(
-        impulse, output, labels_tensor, scores_tensor, result, debug);
+        impulse, block_config, output, labels_tensor, scores_tensor, result, debug);
 
     delete interpreter;
 
@@ -253,7 +268,7 @@ EI_IMPULSE_ERROR run_nn_inference_from_dsp(
     // Run inference, and report any error
     TfLiteStatus invoke_status = interpreter->Invoke();
     if (invoke_status != kTfLiteOk) {
-        error_reporter->Report("Invoke failed (%d)\n", invoke_status);
+        ei_printf("Invoke failed (%d)\n", invoke_status);
         return EI_IMPULSE_TFLITE_ERROR;
     }
 
@@ -278,7 +293,10 @@ EI_IMPULSE_ERROR run_nn_inference_from_dsp(
  */
 EI_IMPULSE_ERROR run_nn_inference(
     const ei_impulse_t *impulse,
-    ei::matrix_t *fmatrix,
+    ei_feature_t *fmatrix,
+    uint32_t learn_block_index,
+    uint32_t* input_block_ids,
+    uint32_t input_block_ids_size,
     ei_impulse_result_t *result,
     void *config_ptr,
     bool debug = false)
@@ -308,7 +326,8 @@ EI_IMPULSE_ERROR run_nn_inference(
 
     uint8_t* tensor_arena = static_cast<uint8_t*>(p_tensor_arena.get());
 
-    auto input_res = fill_input_tensor_from_matrix(fmatrix, input);
+    size_t mtx_size = impulse->dsp_blocks_size + impulse->learning_blocks_size;
+    auto input_res = fill_input_tensor_from_matrix(fmatrix, input, input_block_ids, input_block_ids_size, mtx_size);
     if (input_res != EI_IMPULSE_OK) {
         return input_res;
     }
@@ -322,7 +341,12 @@ EI_IMPULSE_ERROR run_nn_inference(
         output_scores,
         interpreter, tensor_arena, result, debug);
 
-    result->timing.classification_us = ei_read_timer_us() - ctx_start_us;
+    if (result->copy_output) {
+        auto output_res = fill_output_matrix_from_tensor(output, fmatrix[impulse->dsp_blocks_size + learn_block_index].matrix);
+        if (output_res != EI_IMPULSE_OK) {
+            return output_res;
+        }
+    }
 
     if (run_res != EI_IMPULSE_OK) {
         return run_res;
@@ -331,7 +355,7 @@ EI_IMPULSE_ERROR run_nn_inference(
     return EI_IMPULSE_OK;
 }
 
-#if EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#if EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
 /**
  * Special function to run the classifier on images, only works on TFLite models (either interpreter or EON or for tensaiflow)
  * that allocates a lot less memory by quantizing in place. This only works if 'can_run_classifier_image_quantized'
@@ -418,11 +442,9 @@ EI_IMPULSE_ERROR run_nn_inference_image_quantized(
         return run_res;
     }
 
-    result->timing.classification_us = ei_read_timer_us() - ctx_start_us;
-
     return EI_IMPULSE_OK;
 }
-#endif // EI_CLASSIFIER_TFLITE_INPUT_QUANTIZED == 1
+#endif // EI_CLASSIFIER_QUANTIZATION_ENABLED == 1
 
 __attribute__((unused)) int extract_tflite_features(signal_t *signal, matrix_t *output_matrix, void *config_ptr, const float frequency) {
     ei_dsp_config_tflite_t *dsp_config = (ei_dsp_config_tflite_t*)config_ptr;
@@ -436,12 +458,16 @@ __attribute__((unused)) int extract_tflite_features(signal_t *signal, matrix_t *
 
     ei_learning_block_config_tflite_graph_t ei_learning_block_config = {
         .implementation_version = 1,
+        .classification_mode = EI_CLASSIFIER_CLASSIFICATION_MODE_DSP,
         .block_id = dsp_config->block_id,
         .object_detection = false,
         .object_detection_last_layer = EI_CLASSIFIER_LAST_LAYER_UNKNOWN,
         .output_data_tensor = 0,
         .output_labels_tensor = 255,
         .output_score_tensor = 255,
+        .threshold = 0,
+        .quantized = 0,
+        .compiled = 0,
         .graph_config = &ei_config_tflite_graph_0
     };
 

@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef EI_CAMERA_INTERFACE_H
@@ -31,28 +48,51 @@ public:
      * @brief Call to driver to return an image encoded in RGB88
      * Format should be Big Endian, or in other words, if your image
      * pointer is indexed as a char*, then image[0] is R, image[1] is G
-     * image[2] is B, and image[3] is R again (no padding / word alignment) 
-     * 
-     * @param image Point to output buffer for image.  32 bit for word alignment on some platforms 
-     * @param image_size Size of buffer allocated ( should be 3 * width * height ) 
-     * @return true If successful 
-     * @return false If not successful 
+     * image[2] is B, and image[3] is R again (no padding / word alignment)
+     *
+     * @param image Point to output buffer for image.  32 bit for word alignment on some platforms
+     * @param image_size Size of buffer allocated ( should be 3 * width * height )
+     * @return true If successful
+     * @return false If not successful
      */
     virtual bool ei_camera_capture_rgb888_packed_big_endian(
         uint8_t *image,
-        uint32_t image_size) = 0; //pure virtual.  You must provide an implementation
+        uint32_t image_size)
+        {
+            // virtual. You must provide an implementation - if your camera supports color
+            return true;
+        }
+
+    /**
+     * @brief Call to driver to return an image encoded in Grayscale
+     * Format should be Big Endian, or in other words, if your image
+     * pointer is indexed as a char*, then image[0] is R, image[1] is G
+     * image[2] is B, and image[3] is R again (no padding / word alignment)
+     *
+     * @param image Point to output buffer for image.  32 bit for word alignment on some platforms
+     * @param image_size Size of buffer allocated ( should be 1 * width * height )
+     * @return true If successful
+     * @return false If not successful
+     */
+    virtual bool ei_camera_capture_grayscale_packed_big_endian(
+        uint8_t *image,
+        uint32_t image_size)
+        {
+            // virtual. You must provide an implementation - if your camera supports grayscale
+            return false;
+        }
 
     /**
      * @brief Get the min resolution supported by camera
-     * 
-     * @return ei_device_snapshot_resolutions_t 
+     *
+     * @return ei_device_snapshot_resolutions_t
      */
     virtual ei_device_snapshot_resolutions_t get_min_resolution(void) = 0;
 
     /**
      * @brief Get the list of supported resolutions, ie. not requiring
      * any software processing like crop or resize
-     * 
+     *
      * @param res pointer to store the list of resolutions
      * @param res_num pointer to a variable that will contain size of the res list
      */
@@ -60,7 +100,7 @@ public:
 
     /**
      * @brief Set the camera resolution to desired width and height
-     * 
+     *
      * @param res struct with desired width and height of the snapshot
      * @return true if resolution set successfully
      * @return false if something went wrong
@@ -73,12 +113,12 @@ public:
      * (from the list of natively supported)
      * Usually required resolutions are smaller or the same as min camera resolution, because
      * many cameras support much bigger resolutions that required in TinyML models.
-     * 
+     *
      * @param required_width required width of snapshot
      * @param required_height required height of snapshot
      * @return ei_device_snapshot_resolutions_t returns
      * the best match of sensor supported resolutions
-     * to user specified resolution 
+     * to user specified resolution
      */
     virtual ei_device_snapshot_resolutions_t search_resolution(uint32_t required_width, uint32_t required_height)
     {
@@ -111,11 +151,11 @@ public:
     /**
      * @brief Call to driver to initialize camera
      * to capture images in required resolution
-     * 
+     *
      * @param width image width size, in pixels
-     * @param height image height size, in pixels 
-     * @return true if successful 
-     * @return false if not successful 
+     * @param height image height size, in pixels
+     * @return true if successful
+     * @return false if not successful
      */
 
     virtual bool init(uint16_t width, uint16_t height)
@@ -126,9 +166,9 @@ public:
     /**
      * @brief Call to driver to deinitialize camera
      * and release all resources (fb, etc).
-     * 
-     * @return true if successful 
-     * @return false if not successful 
+     *
+     * @return true if successful
+     * @return false if not successful
      */
 
     virtual bool deinit()
@@ -137,10 +177,24 @@ public:
     }
 
     /**
+     * @brief Provides pointer to a framebuffer
+     * if camera framebuffer is not available
+     * a dedicated framebuffer needs to be
+     * created manually
+     *
+     * @return EiCamera*
+     */
+    virtual bool get_fb_ptr(uint8_t** fb_ptr)
+    {
+        return false;
+    }
+
+    /**
      * @brief Implementation must provide a singleton getter
-     * 
-     * @return EiCamera* 
+     *
+     * @return EiCamera*
      */
     static EiCamera *get_camera();
+
 };
 #endif /* EI_CAMERA_INTERFACE_H */

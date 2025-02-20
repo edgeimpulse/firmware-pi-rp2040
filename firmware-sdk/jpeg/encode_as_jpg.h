@@ -1,3 +1,36 @@
+/* The Clear BSD License
+ *
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 #ifndef ENCODE_AS_JPG_H_
 #define ENCODE_AS_JPG_H_
 
@@ -112,12 +145,16 @@ static int encode_bw_signal_as_jpg_common(signal_t *signal, int width, int heigh
         // each call
 
         int offset = jpe.x + (jpe.y * width);
-        rc = signal->get_data(offset, buf_len, encode_buffer);
+
+        int available_pixels_to_read = signal->total_length - offset;
+        int pixels_to_read = (available_pixels_to_read < buf_len) ? available_pixels_to_read : buf_len;
+
+        rc = signal->get_data(offset, pixels_to_read, encode_buffer);
         if (rc != 0) {
             goto cleanup;
         }
 
-        for (size_t ix = 0; ix < buf_len; ix++) {
+        for (int ix = 0; ix < buf_len; ix++) {
             encode_buffer_u8[ix] = static_cast<uint32_t>(encode_buffer[ix]) & 0xff;
         }
 
@@ -211,12 +248,15 @@ static int encode_rgb888_signal_as_jpg_common(signal_t *signal, int width, int h
         // pixel offset
         int offset = jpe.x  + (jpe.y * width);
 
-        rc = signal->get_data(offset, buf_len, encode_buffer);
+        int available_pixels_to_read = signal->total_length - offset;
+        int pixels_to_read = (available_pixels_to_read < buf_len) ? available_pixels_to_read : buf_len;
+
+        rc = signal->get_data(offset, pixels_to_read, encode_buffer);
         if (rc != 0) {
             goto cleanup;
         }
 
-        for (size_t ix = 0; ix < buf_len; ix++) {
+        for (int ix = 0; ix < buf_len; ix++) {
             uint32_t pixel = static_cast<uint32_t>(encode_buffer[ix]);
             // pixel pointer to byte pointer
             size_t out_pix_ptr = ix * bytePp;
@@ -317,12 +357,15 @@ static int encode_rgb565_signal_as_jpg_common(signal_t *signal, int width, int h
         // pixel offset
         int offset = jpe.x  + (jpe.y * width);
 
-        rc = signal->get_data(offset, buf_len, encode_buffer);
+        int available_pixels_to_read = signal->total_length - offset;
+        int pixels_to_read = (available_pixels_to_read < buf_len) ? available_pixels_to_read : buf_len;
+
+        rc = signal->get_data(offset, pixels_to_read, encode_buffer);
         if (rc != 0) {
             goto cleanup;
         }
 
-        for (size_t ix = 0; ix < buf_len; ix++) {
+        for (int ix = 0; ix < pixels_to_read; ix++) {
             uint32_t pixel = static_cast<uint32_t>(encode_buffer[ix]);
             // pixel pointer to byte pointer
             size_t out_pix_ptr = ix * bytePp;

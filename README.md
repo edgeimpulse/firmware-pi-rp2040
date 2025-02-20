@@ -16,11 +16,11 @@ The below instructions assume you are using   Debian-based  Linux  distribution.
 using Microsoft Windows or Apple macOS are provided in [Getting started with Pico guide](https://datasheets.raspberrypi.com/pico/getting-started-with-pico.pdf) (Sections 9.1 and 9.2).
 
 To build firmware, you will need pico-sdk, CMake, a
-cross-platform tool used to build the software, and the GNU Embedded Toolchain for Arm. You can install both these via apt from the command line. 
+cross-platform tool used to build the software, and the GNU Embedded Toolchain for Arm. You can install both these via apt from the command line.
 
 ```bash
 sudo apt update
-sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential 
+sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
 ```
 
 **NOTE**
@@ -42,13 +42,13 @@ mkdir build && cd build
 cmake ..
 make -j4
 ```
-
-If you want to enable debug build (with lots of printing, specifically in data acquisition and flash read/write parts of the code), run 
+If you want to enable debug build (with lots of printing, specifically in data acquisition and flash read/write parts of the code), run
 ```bash
 mkdir build && cd build
 cmake .. -DDEFINE_DEBUG=ON
 make -j4
 ```
+Replace 4 with a number of parallel build processes suitable for your system.
 
 The  fastest  method  to  load  firmware  onto  a  RP2040-based  board  for  the  first  time  is  by  mounting  it  as  a  USB  Mass
 Storage  Device.  Doing  this  allows  you  to  drag  a  file  onto  the  board  to  program  the  flash.  Go  ahead  and  connect  the
@@ -56,6 +56,6 @@ Raspberry  Pi  Pico  to  your  computer  using  a  micro-USB  cable,  making  su
 
 ## Troubleshooting
 
-- For Arduino RP2040 Connect, if you need to keep using Arduino IDE after you finished using Edge Impulse firmware, just connect the board to your computer and flash any code to the board. 
+- For Arduino RP2040 Connect, if you need to keep using Arduino IDE after you finished using Edge Impulse firmware, just connect the board to your computer and flash any code to the board.
 
 - If you are using Windows and experience isssue described in https://github.com/edgeimpulse/firmware-pi-rp2040/issues/1, you need to upgrade the tinyusb submodule of pico-sdk at least to commit https://github.com/hathach/tinyusb/commit/6ec5174d8b24d1f01a443c74a0a3dbee00523efc. After upgrade, remember to re-run cmake command.

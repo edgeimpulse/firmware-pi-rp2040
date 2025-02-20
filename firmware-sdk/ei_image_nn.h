@@ -1,18 +1,35 @@
-/*
- * Copyright (c) 2022 EdgeImpulse Inc.
+/* The Clear BSD License
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
+ * Copyright (c) 2025 EdgeImpulse Inc.
+ * All rights reserved.
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an "AS
- * IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the disclaimer
+ * below) provided that the following conditions are met:
  *
- * SPDX-License-Identifier: Apache-2.0
+ *   * Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above copyright
+ *   notice, this list of conditions and the following disclaimer in the
+ *   documentation and/or other materials provided with the distribution.
+ *
+ *   * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from this
+ *   software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
+ * THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef __EIIMAGENN__H__
@@ -85,8 +102,8 @@ int EiImageNN::cutout_get_data(uint32_t offset, uint32_t length, float *out_ptr)
     while (length != 0) {
         const int R_OFFSET = 0, G_OFFSET = 1, B_OFFSET = 2;
         // clang-format off
-        out_ptr[out_ptr_ix] = 
-            (image[offset + R_OFFSET] << 16) + 
+        out_ptr[out_ptr_ix] =
+            (image[offset + R_OFFSET] << 16) +
             (image[offset + G_OFFSET] << 8) +
             image[offset + B_OFFSET];
         // clang-format on
@@ -158,37 +175,7 @@ void EiImageNN::run_nn(bool debug, int delay_ms, bool use_max_baudrate)
             ei_printf("\r\n");
         }
 
-        // print the predictions
-        ei_printf("Predictions (DSP: %d ms., Classification: %d ms., Anomaly: %d ms.): \n",
-                  result.timing.dsp, result.timing.classification, result.timing.anomaly);
-#if EI_CLASSIFIER_OBJECT_DETECTION == 1
-        bool bb_found = result.bounding_boxes[0].value > 0;
-        for (size_t ix = 0; ix < result.bounding_boxes_count; ix++) {
-            auto bb = result.bounding_boxes[ix];
-            if (bb.value == 0) {
-                continue;
-            }
-
-            ei_printf("    %s (", bb.label);
-            ei_printf_float( bb.value);
-            ei_printf(") [ x: %u, y: %u, width: %u, height: %u ]\n", bb.x, bb.y, bb.width, bb.height);
-        }
-
-        if (!bb_found) {
-            ei_printf("    No objects found\n");
-        }
-#else
-        for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-            ei_printf("    %s: ", result.classification[ix].label);
-            ei_printf_float(result.classification[ix].value);
-            ei_printf("\n");
-        }
-#if EI_CLASSIFIER_HAS_ANOMALY == 1
-        ei_printf("    anomaly score: ", );
-        ei_printf_float(result.anomaly);
-        ei_printf(\n);
-#endif
-#endif
+        display_results(&ei_default_impulse, &result);
 
         if (debug) {
             ei_printf("End output\n");

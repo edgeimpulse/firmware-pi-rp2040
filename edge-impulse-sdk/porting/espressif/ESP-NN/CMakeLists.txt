@@ -1,4 +1,4 @@
-idf_build_get_property(idf_target IDF_TARGET)
+cmake_minimum_required(VERSION 3.5)
 
 set(c_srcs
     "src/activation_functions/esp_nn_relu_ansi.c"
@@ -27,6 +27,7 @@ if(CONFIG_IDF_TARGET_ESP32S3)
         "src/convolution/esp_nn_conv_s16_mult8_esp32s3.S"
         "src/convolution/esp_nn_conv_s8_mult8_1x1_esp32s3.S"
         "src/convolution/esp_nn_conv_s16_mult4_1x1_esp32s3.S"
+        "src/convolution/esp_nn_conv_s8_filter_aligned_input_padded_esp32s3.S"
         "src/convolution/esp_nn_depthwise_conv_s8_mult1_3x3_padded_esp32s3.S"
         "src/convolution/esp_nn_depthwise_conv_s16_mult1_esp32s3.S"
         "src/convolution/esp_nn_depthwise_conv_s16_mult1_3x3_esp32s3.S"
@@ -39,12 +40,18 @@ if(CONFIG_IDF_TARGET_ESP32S3)
         "src/pooling/esp_nn_avg_pool_s8_esp32s3.S")
 endif()
 
+if(CONFIG_IDF_TARGET_ESP32P4)
+    set(p4_srcs
+        "src/convolution/esp_nn_conv_esp32p4.c")
+endif()
+
 idf_component_register(SRCS "${c_srcs}"
                             "${s3_srcs}"
+                            "${p4_srcs}"
                        INCLUDE_DIRS "include" "src/common")
 
 if(CONFIG_IDF_TARGET_ESP32S3)
     target_compile_options(${COMPONENT_LIB} PRIVATE -mlongcalls -fno-unroll-loops -O2 -Wno-unused-function)
 else()
-    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-function)
+    target_compile_options(${COMPONENT_LIB} PRIVATE  -O2 -Wno-unused-function)
 endif()

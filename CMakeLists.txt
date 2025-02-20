@@ -94,9 +94,9 @@ target_include_directories(ei_rp2040_firmware PRIVATE
     ${EI_PLATFORM_FOLDER}/ingestion-sdk-platform/sensors
     ${EI_PLATFORM_FOLDER}/mbedtls_hmac_sha256_sw
     ${EI_PLATFORM_FOLDER}/inference
-    ${EI_PLATFORM_FOLDER}/QCBOR/inc
     ${FIRMWARE_SDK_FOLDER}
     ${FIRMWARE_SDK_FOLDER}/at-server
+    ${FIRMWARE_SDK_FOLDER}/QCBOR/inc
     ThirdParty/Seeed_Arduino_UltrasonicRanger
     ThirdParty/Wire/src
     ThirdParty/Arduino_LSM6DSOX/src
@@ -117,10 +117,10 @@ RECURSIVE_FIND_FILE(SENSORS_FILES "edge-impulse/ingestion-sdk-platform/sensors" 
 RECURSIVE_FIND_FILE(REPL_FILES "edge-impulse/repl" "*.cpp")
 RECURSIVE_FIND_FILE(INGESTION_FILES "edge-impulse/ingestion-sdk-c/" "*.cpp")
 RECURSIVE_FIND_FILE(INFERENCE_FILES "edge-impulse/inference" "*.cpp")
-RECURSIVE_FIND_FILE(QCBOR_FILES "edge-impulse/QCBOR/src" "*.c")
 RECURSIVE_FIND_FILE(MBEDTLS_FILES "edge-impulse/mbedtls_hmac_sha256_sw/mbedtls/src" "*.c")
 RECURSIVE_FIND_FILE(PORTING_FILES "edge-impulse-sdk/porting/raspberry" "*.cpp")
 RECURSIVE_FIND_FILE(FIRMWARE_SDK_FILES "firmware-sdk" "*.cpp")
+RECURSIVE_FIND_FILE(FIRMWARE_SDK_C_FILES "firmware-sdk" "*.c")
 RECURSIVE_FIND_FILE(THIRDPARTY_FILES "ThirdParty" "*.cpp")
 RECURSIVE_FIND_FILE(MIC_FILES "ThirdParty/PDM/src" "*.c")
 
@@ -134,10 +134,10 @@ list(APPEND SOURCE_FILES ${SENSORS_FILES})
 list(APPEND SOURCE_FILES ${REPL_FILES})
 list(APPEND SOURCE_FILES ${INGESTION_FILES})
 list(APPEND SOURCE_FILES ${INFERENCE_FILES})
-list(APPEND SOURCE_FILES ${QCBOR_FILES})
 list(APPEND SOURCE_FILES ${MBEDTLS_FILES})
 list(APPEND SOURCE_FILES ${PORTING_FILES})
 list(APPEND SOURCE_FILES ${FIRMWARE_SDK_FILES})
+list(APPEND SOURCE_FILES ${FIRMWARE_SDK_C_FILES})
 list(APPEND SOURCE_FILES ${THIRDPARTY_FILES})
 list(APPEND SOURCE_FILES ${MIC_FILES})
 
