@@ -33,6 +33,20 @@
 
 # Build directory
 build/
+build-*/
+_deps/
+build-w5500/
+build-w5500-ninja/
+generated/
+pico-sdk/
+pico_flash_region.ld
+
+# CMake / Visual Studio local files
+.vs/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
 
 # MacOS files
 .DS_Store

@@ -43,6 +43,9 @@
 #include "ei_device_raspberry_rp2xxx.h"
 #include "ei_run_impulse.h"
 #include "firmware-sdk/ei_fusion.h"
+#if defined(EI_W5500_ETHERNET) && defined(EI_MQTT_PUBLISH)
+#include "ei_w5500_mqtt.h"
+#endif
 
 typedef enum
 {
@@ -150,11 +153,17 @@ void ei_run_impulse(void)
     if (continuous_mode == true) {
         if (++print_results >= (EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW >> 1)) {
             ei_print_results(&ei_default_impulse, &result);
+#if defined(EI_W5500_ETHERNET) && defined(EI_MQTT_PUBLISH)
+            (void)ei_w5500_mqtt_publish_result(&result);
+#endif
             print_results = 0;
         }
     }
     else {
         ei_print_results(&ei_default_impulse, &result);
+#if defined(EI_W5500_ETHERNET) && defined(EI_MQTT_PUBLISH)
+        (void)ei_w5500_mqtt_publish_result(&result);
+#endif
     }
 
     if (continuous_mode == true) {

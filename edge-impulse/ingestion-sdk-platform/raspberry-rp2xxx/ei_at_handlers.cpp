@@ -43,6 +43,9 @@
 #include "ei_fusion.h"
 #include "ei_image_lib.h"
 #include "ei_run_impulse.h"
+#if defined(EI_W5500_ETHERNET)
+#include "ei_w5500_ethernet.h"
+#endif
 #include "model-parameters/model_metadata.h"
 #include "pico/bootrom.h"
 #include <string>
@@ -449,6 +452,49 @@ bool at_get_config(void)
     return true;
 }
 
+#if defined(EI_W5500_ETHERNET)
+static bool at_netinfo(void)
+{
+    ei_w5500_ethernet_netinfo_t netinfo;
+
+    if (!ei_w5500_ethernet_get_netinfo(&netinfo)) {
+        ei_printf("[W5500] NETINFO unavailable\r\n");
+        return true;
+    }
+
+    ei_printf("[W5500] Link: %s\r\n", netinfo.phy_link == EI_W5500_PHY_LINK_ON ? "UP" : "DOWN");
+    ei_printf("[W5500] MAC: %02X:%02X:%02X:%02X:%02X:%02X\r\n",
+            netinfo.mac[0], netinfo.mac[1], netinfo.mac[2],
+            netinfo.mac[3], netinfo.mac[4], netinfo.mac[5]);
+    ei_printf("[W5500] DHCP: %s\r\n", netinfo.dhcp_leased ? "LEASED" : "NOT_LEASED");
+
+    if(netinfo.dhcp_leased)
+    {
+        ei_printf("[W5500] IP: %u.%u.%u.%u\r\n",
+                netinfo.dhcp_leased ? netinfo.ip[0] : 0,
+                netinfo.dhcp_leased ? netinfo.ip[1] : 0,
+                netinfo.dhcp_leased ? netinfo.ip[2] : 0,
+                netinfo.dhcp_leased ? netinfo.ip[3] : 0);
+        ei_printf("[W5500] SN: %u.%u.%u.%u\r\n",
+                netinfo.dhcp_leased ? netinfo.sn[0] : 0,
+                netinfo.dhcp_leased ? netinfo.sn[1] : 0,
+                netinfo.dhcp_leased ? netinfo.sn[2] : 0,
+                netinfo.dhcp_leased ? netinfo.sn[3] : 0);
+        ei_printf("[W5500] GW: %u.%u.%u.%u\r\n",
+                netinfo.dhcp_leased ? netinfo.gw[0] : 0,
+                netinfo.dhcp_leased ? netinfo.gw[1] : 0,
+                netinfo.dhcp_leased ? netinfo.gw[2] : 0,
+                netinfo.dhcp_leased ? netinfo.gw[3] : 0);
+        ei_printf("[W5500] DNS: %u.%u.%u.%u\r\n",
+                netinfo.dhcp_leased ? netinfo.dns[0] : 0,
+                netinfo.dhcp_leased ? netinfo.dns[1] : 0,
+                netinfo.dhcp_leased ? netinfo.dns[2] : 0,
+                netinfo.dhcp_leased ? netinfo.dns[3] : 0);
+    }
+    return true;
+}
+#endif
+
 ATServer *ei_at_init(EiDeviceRP2xxx *device)
 {
     ATServer *at;
@@ -555,6 +601,9 @@ ATServer *ei_at_init(EiDeviceRP2xxx *device)
         nullptr,
         at_read_raw,
         AT_READRAW_ARS);
+#if defined(EI_W5500_ETHERNET)
+    at->register_command(AT_NETINFO, AT_NETINFO_HELP_TEXT, nullptr, at_netinfo, nullptr, nullptr);
+#endif
     at->register_command(AT_BOOTMODE, AT_BOOTMODE_HELP_TEXT, at_bootmode, nullptr, nullptr, nullptr);
     return at;
 }

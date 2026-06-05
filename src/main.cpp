@@ -43,6 +43,10 @@
 #include "ei_rp2xxx_internal_temperature.h"
 #include "ei_run_impulse.h"
 #include "ei_ultrasonicsensor.h"
+#include "ei_w5500_ethernet.h"
+#if defined(EI_W5500_ETHERNET) && defined(EI_MQTT_PUBLISH)
+#include "ei_w5500_mqtt.h"
+#endif
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "task.h"
@@ -56,12 +60,25 @@
 
 EiDeviceInfo *EiDevInfo = dynamic_cast<EiDeviceInfo *>(EiDeviceRP2xxx::get_device());
 static ATServer *at;
+static TaskHandle_t ei_serial_task_handle = nullptr;
+
+#if defined(EI_W5500_ETHERNET)
+static TaskHandle_t ei_ethernet_task_handle = nullptr;
+#endif
+
+static constexpr uint16_t EI_SERIAL_TASK_STACK = 2048;
+static constexpr UBaseType_t EI_SERIAL_TASK_PRIO = tskIDLE_PRIORITY + 2;
+
+#if defined(EI_W5500_ETHERNET)
+static constexpr uint16_t EI_ETHERNET_TASK_STACK = 2048;
+static constexpr UBaseType_t EI_ETHERNET_TASK_PRIO = tskIDLE_PRIORITY + 1;
+#endif
 
 void ei_init(void)
 {
     EiDeviceRP2xxx *dev = static_cast<EiDeviceRP2xxx *>(EiDeviceRP2xxx::get_device());
 
-    ei_sleep(2000); // Wait for the serial port to be ready
+    ei_sleep(3000); // Wait for the serial port to be ready
 
     ei_printf(
         "Hello from Edge Impulse\r\n"
@@ -74,7 +91,7 @@ void ei_init(void)
 
     // Setup ADXL345 Accelerometer
     if (ei_accelerometer_init() == false) {
-        ei_printf("ADXL345 initialization failed");
+        ei_printf("ADXL345 initialization failed\r\n");
     }
 
     // Setup the inertial sensor
@@ -87,7 +104,7 @@ void ei_init(void)
         ei_printf("DHT11 initialization failed\r\n");
     }
     else {
-        ei_printf("DHT11 initialization successful");
+        ei_printf("DHT11 initialization successful\r\n");
     }
 
     // Setup the ultrasonic sensor
@@ -110,22 +127,53 @@ void ei_init(void)
     at->print_prompt();
 }
 
-void ei_main(void *pvParameters)
+void ei_serial_task(void *pvParameters)
 {
     /* Initialize Edge Impulse sensors and commands */
     ei_init();
 
+#if defined(EI_W5500_ETHERNET)
+    if (ei_ethernet_task_handle != nullptr) {
+        xTaskNotifyGive(ei_ethernet_task_handle);
+    }
+#endif
+
     while (true) {
         /* handle command comming from uart */
-        ei_sleep(5);
         char data = ei_get_serial_byte();
 
-        while (data != 0xFF) {
+        while (data != (char)0xFF) {
             at->handle(data);
             data = ei_get_serial_byte();
         }
+
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
+
+#if defined(EI_W5500_ETHERNET)
+void ei_ethernet_task(void *pvParameters)
+{
+    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) == 0) {
+        return;
+    }
+
+    if(!ei_w5500_ethernet_init())
+    {
+        ei_printf("W5500 ethernet init failed...\r\n");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    while (true) {
+        ei_w5500_ethernet_poll();
+#if defined(EI_W5500_ETHERNET) && defined(EI_MQTT_PUBLISH)
+        (void)ei_w5500_mqtt_yield();
+#endif
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+#endif
 
 /* To verify FreeRTOS is working across both Pico targets */
 void test_task(void *pvParameters)
@@ -138,7 +186,7 @@ void test_task(void *pvParameters)
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0); // Turn LED off
         sleep_ms(1250); // Wait for 1.25 seconds
 
-#elif defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO)
+#elif defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO) || defined(WIZNET_W5500_EVB_PICO)
 
         gpio_put(PICO_DEFAULT_LED_PIN, 1);
         sleep_ms(2050);
@@ -174,8 +222,11 @@ int main(void)
         return -1;
     }
 #endif
+    xTaskCreate(ei_serial_task, "ei_serial", EI_SERIAL_TASK_STACK, NULL, EI_SERIAL_TASK_PRIO, &ei_serial_task_handle);
 
-    xTaskCreate(ei_main, "ei_main", 1024, NULL, (tskIDLE_PRIORITY + 1), NULL);
+#if defined(EI_W5500_ETHERNET)
+    xTaskCreate(ei_ethernet_task, "ei_eth", EI_ETHERNET_TASK_STACK, NULL, EI_ETHERNET_TASK_PRIO, &ei_ethernet_task_handle);
+#endif
 
     vTaskStartScheduler();
 

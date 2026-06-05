@@ -137,7 +137,7 @@ void EiDeviceRP2xxx::set_state(EiState state)
 #if defined(RASPBERRYPI_PICO2_W) || defined(RASPBERRYPI_PICO_W)
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
 #endif
-#if defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO)
+#if defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO) || defined(WIZNET_W5500_EVB_PICO)
         gpio_put(LED_PIN, 1);
 #endif
 
@@ -146,7 +146,7 @@ void EiDeviceRP2xxx::set_state(EiState state)
 #if defined(RASPBERRYPI_PICO2_W) || defined(RASPBERRYPI_PICO_W)
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
 #endif
-#if defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO)
+#if defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO) || defined(WIZNET_W5500_EVB_PICO)
         gpio_put(LED_PIN, 0);
 #endif
         ei_sleep(50);
