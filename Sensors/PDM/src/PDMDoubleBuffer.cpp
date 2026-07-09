@@ -59,7 +59,7 @@ void PDMDoubleBuffer::reset()
 
 size_t PDMDoubleBuffer::availableForWrite()
 {
-  return (_size - (_length[_index] - _readOffset[_index]));
+  return (_size - _length[_index]);
 }
 
 size_t PDMDoubleBuffer::write(const void *buffer, size_t size)
