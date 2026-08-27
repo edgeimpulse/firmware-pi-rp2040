@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.15)
 
+# Allow custom board definitions in this repository (e.g. w5500_evb_pico).
+# This must be set before importing Pico SDK so board resolution can find custom headers.
+list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards/include/boards)
+
 include(pico_sdk_import.cmake)
 set(FREERTOS_KERNEL_PATH ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS-Kernel)
 include(FreeRTOS_Kernel_import.cmake)
@@ -9,16 +13,21 @@ set(EI_SDK_FOLDER ${MODEL_FOLDER}/edge-impulse-sdk)
 set(DRIVERS Sensors)
 set(EI_PLATFORM_FOLDER edge-impulse)
 set(FIRMWARE_SDK_FOLDER firmware-sdk)
+set(WIZNET_W5X00_PLATFORM_DIR
+    ${CMAKE_CURRENT_LIST_DIR}/edge-impulse/ingestion-sdk-platform/wiznet-w5x00_evb_pico
+)
 
-if(PICO_BOARD STREQUAL "pico")
-    set(RP_PROJCT_NAME ei_rp2040_firmware)
-else()
+if(PICO_BOARD MATCHES "^pico2")
     set(RP_PROJCT_NAME ei_rp2350_firmware)
+else()
+    set(RP_PROJCT_NAME ei_rp2040_firmware)
 endif()
 
 project(${RP_PROJCT_NAME} C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
+
+option(EI_ENABLE_MQTT_PUBLISH "Publish Edge Impulse inference result over MQTT using W5500" OFF)
 
 
 pico_sdk_init()
@@ -43,6 +52,7 @@ target_link_libraries(${RP_PROJCT_NAME}
                       pico_stdlib
                       pico_unique_id
                       hardware_gpio
+                      hardware_spi
                       hardware_adc
                       hardware_i2c
                       hardware_irq
@@ -58,6 +68,13 @@ endif()
 target_compile_definitions(${RP_PROJCT_NAME} PRIVATE
     configNUMBER_OF_CORES=2
     )
+
+if(PICO_BOARD STREQUAL "w5500_evb_pico")
+    target_compile_definitions(${RP_PROJCT_NAME} PRIVATE
+        EI_W5500_ETHERNET=1
+        _WIZCHIP_=W5500
+    )
+endif()
 
 
 target_include_directories(${RP_PROJCT_NAME} PRIVATE
@@ -84,6 +101,7 @@ target_include_directories(${RP_PROJCT_NAME} PRIVATE
     ${EI_PLATFORM_FOLDER}
     ${EI_PLATFORM_FOLDER}/ingestion-sdk-c
     ${EI_PLATFORM_FOLDER}/ingestion-sdk-platform/raspberry-rp2xxx
+    ${WIZNET_W5X00_PLATFORM_DIR}
     ${EI_PLATFORM_FOLDER}/ingestion-sdk-platform/sensors
     ${EI_PLATFORM_FOLDER}/inference
     ${FIRMWARE_SDK_FOLDER}/QCBOR/inc
@@ -96,6 +114,37 @@ target_include_directories(${RP_PROJCT_NAME} PRIVATE
     ${DRIVERS}/ADXL345
     ${DRIVERS}/PDM/src/include
 )
+
+if(PICO_BOARD STREQUAL "w5500_evb_pico")
+    target_include_directories(${RP_PROJCT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ioLibrary_Driver/Ethernet
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ioLibrary_Driver/Internet/DHCP
+    )
+
+    target_sources(${RP_PROJCT_NAME} PRIVATE
+        ${WIZNET_W5X00_PLATFORM_DIR}/ei_w5500_ethernet.cpp
+    )
+endif()
+
+if(EI_ENABLE_MQTT_PUBLISH)
+    if(NOT PICO_BOARD STREQUAL "w5500_evb_pico")
+        message(FATAL_ERROR "EI_ENABLE_MQTT_PUBLISH requires PICO_BOARD=w5500_evb_pico")
+    endif()
+
+    target_compile_definitions(${RP_PROJCT_NAME} PRIVATE
+        EI_MQTT_PUBLISH=1
+    )
+
+    target_sources(${RP_PROJCT_NAME} PRIVATE
+        ${WIZNET_W5X00_PLATFORM_DIR}/ei_w5500_mqtt.cpp
+        ${WIZNET_W5X00_PLATFORM_DIR}/mqtt/MQTTClient.c
+        ${WIZNET_W5X00_PLATFORM_DIR}/mqtt/mqtt_interface.c
+    )
+
+    target_include_directories(${RP_PROJCT_NAME} PRIVATE
+        ${WIZNET_W5X00_PLATFORM_DIR}/mqtt
+    )
+endif()
 
 include_directories(${INCLUDES})
 
@@ -131,6 +180,15 @@ list(APPEND SOURCE_FILES ${PORTING_FILES})
 list(APPEND SOURCE_FILES ${FIRMWARE_SDK_FILES})
 list(APPEND SOURCE_FILES ${DRIVER_FILES})
 list(APPEND SOURCE_FILES ${MIC_FILES})
+
+if(PICO_BOARD STREQUAL "w5500_evb_pico")
+    list(APPEND SOURCE_FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ioLibrary_Driver/Ethernet/wizchip_conf.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ioLibrary_Driver/Ethernet/socket.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ioLibrary_Driver/Ethernet/W5500/w5500.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ioLibrary_Driver/Internet/DHCP/dhcp.c
+    )
+endif()
 
 target_sources(${RP_PROJCT_NAME} PRIVATE ${SOURCE_FILES})
 pico_add_extra_outputs(${RP_PROJCT_NAME})
