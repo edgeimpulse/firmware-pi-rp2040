@@ -126,6 +126,8 @@
 #define AT_BOOTMODE_HELP_TEXT       "Jump to bootloader"
 #define AT_INFO                     "INFO"
 #define AT_INFO_HELP_TEXT           "Prints details about compiled firmware and ML model"
+#define AT_NETINFO                  "NETINFO"
+#define AT_NETINFO_HELP_TEXT        "Print W5500 Ethernet information"
 
 /*************************************************************************************************/
 /* HELP is not necessary as it is built-in into ATServer and

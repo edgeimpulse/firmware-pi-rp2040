@@ -45,6 +45,14 @@ cmake ..
 make -j4
 ```
 
+### W5500-EVB-Pico (RP2040, Ethernet disabled)
+For W5500-EVB-Pico board bring-up with RP2040 firmware path (no Ethernet initialization), build with:
+```bash
+mkdir build && cd build
+cmake .. -DPICO_BOARD=w5500_evb_pico
+make -j4
+```
+
 ### Raspberry PI Pico 2 (RP2350)
 Use following build commands to build for RP2350 based hardware:
 ```bash
